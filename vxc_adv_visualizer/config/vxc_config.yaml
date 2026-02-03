@@ -1,0 +1,26 @@
+# VXC XY Stage Controller Configuration
+
+# Serial connection parameters
+port: COM8
+baudrate: 9600
+timeout: 2.0
+line_ending: "\r"
+
+# Initialization/ID queries (used for connection verification)
+# V = Status (R=Ready, B=Busy, F=Fault)
+# X = Read Motor 1 Position
+init_commands:
+  - "V"
+  - "X"
+
+# Motion parameters
+max_speed_steps_per_sec: 5000  # Maximum speed
+acceleration_steps_per_sec2: 10000  # Acceleration rate
+
+# Coordinate system
+steps_per_foot: 46000  # 4600 steps = 0.1 feet
+position_tolerance_steps: 1  # Allowed position error during verification
+
+# Motion timing
+motion_poll_interval_ms: 50  # Check motion status every N ms
+motion_timeout_sec: 60  # Maximum wait for motion completion

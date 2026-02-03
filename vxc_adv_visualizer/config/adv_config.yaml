@@ -1,0 +1,18 @@
+# SonTek FlowTracker2 ADV Configuration
+
+# Serial connection parameters
+port: COM8
+baudrate: 9600
+timeout: 2.0
+
+# Sampling parameters
+sampling_rate_hz: 10
+sample_interval_sec: 0.1
+
+# Data quality thresholds
+min_snr_db: 5.0  # Minimum signal-to-noise ratio
+min_correlation_percent: 70.0  # Minimum correlation coefficient
+
+# Probe characteristics
+probe_diameter_mm: 0.5  # For Reynolds number calculation
+probe_sampling_volume_mm3: 0.06  # Approximate sampling volume

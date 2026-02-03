@@ -1,0 +1,6 @@
+base_sampling_duration_sec: 10.0
+froude_threshold: 1.0
+grid:
+  x_spacing_feet: 0.1
+  y_spacing_feet: 0.05
+max_sampling_duration_sec: 20.0
