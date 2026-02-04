@@ -10,6 +10,15 @@ pip install -r requirements.txt
 python vxc_adv_visualizer/main.py
 ```
 
+## Minimal ADV MVP (no GUI)
+
+Use this to validate ADV streaming without the full application.
+
+1) Set ADV parameters in [vxc_adv_visualizer/config/adv_config.yaml](vxc_adv_visualizer/config/adv_config.yaml)
+2) Run:
+   - python vxc_adv_visualizer/mvp/adv_stream_mvp.py --duration 10
+   - Add --raw to print raw lines (no parsing)
+
 **Expected Result**: PyQt5 window appears with 4 tabs (Calibration, Acquisition, Configuration, Export)
 
 ---

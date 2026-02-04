@@ -1,9 +1,13 @@
 # SonTek FlowTracker2 ADV Configuration
 
 # Serial connection parameters
-port: COM8
-baudrate: 9600
+port: COM9
+baudrate: 57600
 timeout: 2.0
+line_ending: "\r"
+start_command: "START"
+stop_command: "STOP"
+expected_fields: 8
 
 # Sampling parameters
 sampling_rate_hz: 10

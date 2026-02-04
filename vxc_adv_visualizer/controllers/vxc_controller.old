@@ -6,7 +6,7 @@ Simple implementation matching reference code exactly.
 import serial
 import time
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,6 @@ class VXCController:
             )
             time.sleep(0.1)  # Allow connection to stabilize
             logger.info(f"Connected to {self.port} at {self.baudrate} baud")
-            
-            # Go online with echo off
-            self.go_online(echo=False)
-            
             return True
         except serial.SerialException as e:
             logger.error(f"Connection failed: {e}")
@@ -283,3 +279,70 @@ class VXCController:
                 dy = int(y - current_y)
                 if dy != 0:
                     self.step_motor(motor=2, steps=dy)
+        motor_map = {'X': 'C', 'Y': 'D'}
+        motor = motor_map[axis]
+        
+        # Send index command: "C I +1000" or "D I -500"
+        cmd = f"{motor} I {steps:+d}"
+        self.send_command(cmd, wait_ms=100)
+        
+        logger.info(f"{axis} axis: moved {steps} steps")
+    
+    def move_absolute(self, x: Optional[float] = None, y: Optional[float] = None) -> None:
+        """Move to absolute position.
+        
+        Args:
+            x: Target X position in steps
+            y: Target Y position in steps
+        """
+        current_x, current_y = self.get_position()
+        
+        if x is not None:
+            dx = int(x - current_x)
+            if dx != 0:
+                self.step_motor('X', dx)
+        
+        if y is not None:
+            dy = int(y - current_y)
+            if dy != 0:
+                self.step_motor('Y', dy)
+    
+    def zero_position(self) -> None:
+        """Zero current position (set as origin)."""
+        self.send_command("N", wait_ms=100)
+        logger.info("Position zeroed")
+    
+    def stop_motor(self) -> None:
+        """Stop all motor motion."""
+        self.send_command("D", wait_ms=50)
+        logger.info("Motors stopped")
+    
+    def set_speed(self, axis: str, speed: int) -> None:
+        """Set motor speed.
+        
+        Args:
+            axis: 'X' or 'Y'
+            speed: Speed value (1-6000 steps/sec)
+        """
+        motor_map = {'X': 'C', 'Y': 'D'}
+        motor = motor_map.get(axis)
+        
+        if motor:
+            cmd = f"{motor} S{speed}"
+            self.send_command(cmd, wait_ms=50)
+            logger.debug(f"{axis} speed set to {speed}")
+    
+    def set_acceleration(self, axis: str, accel: int) -> None:
+        """Set motor acceleration.
+        
+        Args:
+            axis: 'X' or 'Y'
+            accel: Acceleration value
+        """
+        motor_map = {'X': 'C', 'Y': 'D'}
+        motor = motor_map.get(axis)
+        
+        if motor:
+            cmd = f"{motor} A{accel}"
+            self.send_command(cmd, wait_ms=50)
+            logger.debug(f"{axis} acceleration set to {accel}")

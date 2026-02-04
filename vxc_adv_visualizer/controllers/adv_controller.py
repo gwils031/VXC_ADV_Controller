@@ -39,7 +39,12 @@ class ADVController:
     # Retry configuration
     RETRY_DELAYS = [0.5, 1.0, 2.0]
     
-    def __init__(self, port: str, baudrate: int = 9600):
+    def __init__(self, port: str, baudrate: int = 9600,
+                 timeout: Optional[float] = None,
+                 line_ending: str = "\r",
+                 start_command: str = "START",
+                 stop_command: str = "STOP",
+                 expected_fields: int = 8):
         """Initialize ADV controller connection.
         
         Args:
@@ -48,6 +53,11 @@ class ADVController:
         """
         self.port = port
         self.baudrate = baudrate
+        self.timeout = timeout if timeout is not None else self.SERIAL_TIMEOUT
+        self.line_ending = line_ending
+        self.start_command = start_command
+        self.stop_command = stop_command
+        self.expected_fields = expected_fields
         self.serial = None
         self.connected = False
         self.streaming = False
@@ -65,7 +75,7 @@ class ADVController:
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=self.SERIAL_TIMEOUT
+                timeout=self.timeout
             )
             time.sleep(0.5)
             self.serial.reset_input_buffer()
@@ -105,7 +115,8 @@ class ADVController:
         
         try:
             # Send start streaming command (device-specific)
-            self.serial.write(b"START\r")
+            payload = f"{self.start_command}{self.line_ending}".encode("ascii", errors="ignore")
+            self.serial.write(payload)
             time.sleep(0.5)
             self.streaming = True
             logger.info("ADV streaming started")
@@ -124,7 +135,8 @@ class ADVController:
             return False
         
         try:
-            self.serial.write(b"STOP\r")
+            payload = f"{self.stop_command}{self.line_ending}".encode("ascii", errors="ignore")
+            self.serial.write(payload)
             time.sleep(0.2)
             self.streaming = False
             logger.info("ADV streaming stopped")
@@ -145,12 +157,12 @@ class ADVController:
         
         try:
             # Read line from device
-            line = self.serial.readline()
-            if not line:
+            text = self.read_raw_line()
+            if not text:
                 return None
             
             # Parse sample data
-            return self._parse_sample_line(line)
+            return self._parse_sample_line(text)
             
         except serial.SerialException as e:
             logger.error(f"Serial error reading ADV sample: {e}")
@@ -180,8 +192,23 @@ class ADVController:
         if self.connected and self.serial:
             self.serial.reset_input_buffer()
     
-    def _parse_sample_line(self, line: bytes) -> Optional[ADVSampleRaw]:
-        """Parse raw byte line into ADVSampleRaw.
+    def read_raw_line(self) -> Optional[str]:
+        """Read raw line from device as text."""
+        if not self.connected or not self.streaming:
+            logger.error("ADV not connected or not streaming")
+            return None
+
+        if not self.serial:
+            return None
+
+        line = self.serial.readline()
+        if not line:
+            return None
+
+        return line.decode("ascii", errors="ignore").strip()
+
+    def _parse_sample_line(self, text: str) -> Optional[ADVSampleRaw]:
+        """Parse raw text line into ADVSampleRaw.
         
         Expected format (ASCII): U,V,W,SNR,CORR,DEPTH,AMP,TEMP
         Example: 0.123,0.045,-0.012,45.2,95.5,0.52,1200,18.5
@@ -193,14 +220,12 @@ class ADVController:
             ADVSampleRaw object or None if parse failed
         """
         try:
-            # Decode and strip whitespace
-            text = line.decode('ascii', errors='ignore').strip()
             if not text:
                 return None
             
             # Split fields
-            parts = text.split(',')
-            if len(parts) < 8:
+            parts = [p.strip() for p in text.split(',') if p.strip() != ""]
+            if len(parts) < self.expected_fields:
                 logger.warning(f"Incomplete sample line: {text}")
                 return None
             
@@ -229,7 +254,7 @@ class ADVController:
             return sample
             
         except (ValueError, IndexError) as e:
-            logger.error(f"Failed to parse ADV sample line '{line}': {e}")
+            logger.error(f"Failed to parse ADV sample line '{text}': {e}")
             return None
     
     def validate_sample(self, sample: ADVSampleRaw, 

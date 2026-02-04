@@ -1,5 +1,5 @@
-"""PyQt5 GUI components."""
+"""GUI module."""
 
 from .main_window import MainWindow
 
-__all__ = ["MainWindow"]
+__all__ = ['MainWindow']
