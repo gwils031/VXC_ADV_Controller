@@ -1,0 +1,257 @@
+
+================================================================================
+VXC/ADV DATA COLLECTION SESSION LOG
+================================================================================
+Session: session_20260224_193437_Historical_Import_20260224_193437
+Started: 2026-02-24 19:34:37 UTC
+Operator: System
+Scan Type: Historical_Import
+================================================================================
+
+[2026-02-24 19:34:37.837] SESSION_START   | Started session: Historical_Import_20260224_193437
+[2026-02-24 19:34:37.845] MEASUREMENT     | Seq 1: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:37.864] MEASUREMENT     | Seq 2: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.389] MEASUREMENT     | Seq 3: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.400] MEASUREMENT     | Seq 4: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.432] MEASUREMENT     | Seq 5: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.461] MEASUREMENT     | Seq 6: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.499] MEASUREMENT     | Seq 7: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.526] MEASUREMENT     | Seq 8: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.553] MEASUREMENT     | Seq 9: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.591] MEASUREMENT     | Seq 10: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.613] MEASUREMENT     | Seq 11: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.647] MEASUREMENT     | Seq 12: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.669] MEASUREMENT     | Seq 13: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.695] MEASUREMENT     | Seq 14: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.729] MEASUREMENT     | Seq 15: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.751] MEASUREMENT     | Seq 16: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.786] MEASUREMENT     | Seq 17: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.819] MEASUREMENT     | Seq 18: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.841] MEASUREMENT     | Seq 19: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.883] MEASUREMENT     | Seq 20: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.899] MEASUREMENT     | Seq 21: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.941] MEASUREMENT     | Seq 22: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.955] MEASUREMENT     | Seq 23: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:38.982] MEASUREMENT     | Seq 24: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.025] MEASUREMENT     | Seq 25: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.059] MEASUREMENT     | Seq 26: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.087] MEASUREMENT     | Seq 27: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.108] MEASUREMENT     | Seq 28: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.134] MEASUREMENT     | Seq 29: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.159] MEASUREMENT     | Seq 30: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.487] MEASUREMENT     | Seq 31: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.500] MEASUREMENT     | Seq 32: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.577] MEASUREMENT     | Seq 33: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.588] MEASUREMENT     | Seq 34: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.631] MEASUREMENT     | Seq 35: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.650] MEASUREMENT     | Seq 36: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.681] MEASUREMENT     | Seq 37: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.701] MEASUREMENT     | Seq 38: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.741] MEASUREMENT     | Seq 39: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.755] MEASUREMENT     | Seq 40: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.806] MEASUREMENT     | Seq 41: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.812] MEASUREMENT     | Seq 42: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.852] MEASUREMENT     | Seq 43: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.866] MEASUREMENT     | Seq 44: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.909] MEASUREMENT     | Seq 45: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.921] MEASUREMENT     | Seq 46: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.954] MEASUREMENT     | Seq 47: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:39.981] MEASUREMENT     | Seq 48: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.025] MEASUREMENT     | Seq 49: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.038] MEASUREMENT     | Seq 50: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.074] MEASUREMENT     | Seq 51: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.113] MEASUREMENT     | Seq 52: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.137] MEASUREMENT     | Seq 53: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.178] MEASUREMENT     | Seq 54: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.194] MEASUREMENT     | Seq 55: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.245] MEASUREMENT     | Seq 56: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.251] MEASUREMENT     | Seq 57: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.296] MEASUREMENT     | Seq 58: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.309] MEASUREMENT     | Seq 59: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.343] MEASUREMENT     | Seq 60: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.359] MEASUREMENT     | Seq 61: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.410] MEASUREMENT     | Seq 62: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.422] MEASUREMENT     | Seq 63: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.454] MEASUREMENT     | Seq 64: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.483] MEASUREMENT     | Seq 65: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.504] MEASUREMENT     | Seq 66: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.549] MEASUREMENT     | Seq 67: Position (0.0, 0.0), Samples: 87, Quality: POOR
+[2026-02-24 19:34:40.565] MEASUREMENT     | Seq 68: Position (0.0127, 0.0), Samples: 451, Quality: POOR
+[2026-02-24 19:34:40.643] MEASUREMENT     | Seq 69: Position (0.1397, 0.0254), Samples: 565, Quality: POOR
+[2026-02-24 19:34:40.666] MEASUREMENT     | Seq 70: Position (0.2413, 0.0254), Samples: 587, Quality: POOR
+[2026-02-24 19:34:40.811] MEASUREMENT     | Seq 71: Position (0.2413, -0.012649), Samples: 599, Quality: POOR
+[2026-02-24 19:34:40.849] MEASUREMENT     | Seq 72: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:40.950] MEASUREMENT     | Seq 73: Position (0.2413, -0.012649), Samples: 177, Quality: POOR
+[2026-02-24 19:34:40.998] MEASUREMENT     | Seq 74: Position (0.2413, -0.012649), Samples: 571, Quality: POOR
+[2026-02-24 19:34:41.136] MEASUREMENT     | Seq 75: Position (0.3429, -0.012649), Samples: 599, Quality: POOR
+[2026-02-24 19:34:41.146] MEASUREMENT     | Seq 76: Position (0.3429, -0.012649), Samples: 368, Quality: GOOD
+[2026-02-24 19:34:41.250] MEASUREMENT     | Seq 77: Position (0.3048, 0.051759), Samples: 337, Quality: POOR
+[2026-02-24 19:34:41.332] MEASUREMENT     | Seq 78: Position (0.3048, 0.051759), Samples: 599, Quality: POOR
+[2026-02-24 19:34:41.455] MEASUREMENT     | Seq 79: Position (0.3048, 0.051759), Samples: 598, Quality: POOR
+[2026-02-24 19:34:41.493] MEASUREMENT     | Seq 80: Position (0.3048, 0.051759), Samples: 599, Quality: POOR
+[2026-02-24 19:34:41.663] MEASUREMENT     | Seq 81: Position (0.3048, 0.051759), Samples: 597, Quality: FAIR
+[2026-02-24 19:34:41.708] MEASUREMENT     | Seq 82: Position (0.3048, 0.051759), Samples: 597, Quality: GOOD
+[2026-02-24 19:34:41.841] MEASUREMENT     | Seq 83: Position (0.3048, 0.051759), Samples: 599, Quality: GOOD
+[2026-02-24 19:34:41.886] MEASUREMENT     | Seq 84: Position (0.3048, 0.051759), Samples: 598, Quality: GOOD
+[2026-02-24 19:34:41.966] MEASUREMENT     | Seq 85: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.002] MEASUREMENT     | Seq 86: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.103] MEASUREMENT     | Seq 87: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.193] MEASUREMENT     | Seq 88: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.266] MEASUREMENT     | Seq 89: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.311] MEASUREMENT     | Seq 90: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.425] MEASUREMENT     | Seq 91: Position (1.3e-05, 3.2e-05), Samples: 348, Quality: POOR
+[2026-02-24 19:34:42.486] MEASUREMENT     | Seq 92: Position (1.3e-05, 3.2e-05), Samples: 599, Quality: POOR
+[2026-02-24 19:34:42.588] MEASUREMENT     | Seq 93: Position (0.0, 0.0), Samples: 51, Quality: POOR
+[2026-02-24 19:34:42.627] MEASUREMENT     | Seq 94: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.748] MEASUREMENT     | Seq 95: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.779] MEASUREMENT     | Seq 96: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:42.850] MEASUREMENT     | Seq 97: Position (0.0, 0.0), Samples: 197, Quality: POOR
+[2026-02-24 19:34:42.888] MEASUREMENT     | Seq 98: Position (1.041159, 0.0), Samples: 137, Quality: POOR
+[2026-02-24 19:34:42.977] MEASUREMENT     | Seq 99: Position (1.041159, 0.24765), Samples: 130, Quality: POOR
+[2026-02-24 19:34:43.073] MEASUREMENT     | Seq 100: Position (6e-06, 0.24765), Samples: 109, Quality: POOR
+[2026-02-24 19:34:43.156] MEASUREMENT     | Seq 101: Position (6e-06, 0.24765), Samples: 109, Quality: POOR
+[2026-02-24 19:34:43.165] MEASUREMENT     | Seq 102: Position (1.041165, 6e-06), Samples: 141, Quality: POOR
+[2026-02-24 19:34:43.283] MEASUREMENT     | Seq 103: Position (1.041165, 6e-06), Samples: 267, Quality: POOR
+[2026-02-24 19:34:43.353] MEASUREMENT     | Seq 104: Position (0.124803, 6e-06), Samples: 140, Quality: POOR
+[2026-02-24 19:34:43.466] MEASUREMENT     | Seq 105: Position (0.17105, 0.087001), Samples: 477, Quality: POOR
+[2026-02-24 19:34:43.518] MEASUREMENT     | Seq 106: Position (0.309797, 0.087001), Samples: 494, Quality: POOR
+[2026-02-24 19:34:43.627] MEASUREMENT     | Seq 107: Position (0.17105, 0.102349), Samples: 494, Quality: POOR
+[2026-02-24 19:34:43.666] MEASUREMENT     | Seq 108: Position (0.217297, 0.117697), Samples: 420, Quality: POOR
+[2026-02-24 19:34:43.745] MEASUREMENT     | Seq 109: Position (0.309797, 0.041497), Samples: 155, Quality: POOR
+[2026-02-24 19:34:43.818] MEASUREMENT     | Seq 110: Position (0.309797, 0.041497), Samples: 598, Quality: POOR
+[2026-02-24 19:34:43.926] MEASUREMENT     | Seq 111: Position (0.309797, 0.041497), Samples: 599, Quality: POOR
+[2026-02-24 19:34:43.956] MEASUREMENT     | Seq 112: Position (0.309797, 0.041497), Samples: 420, Quality: POOR
+[2026-02-24 19:34:44.060] MEASUREMENT     | Seq 113: Position (0.516795, 0.041497), Samples: 599, Quality: POOR
+[2026-02-24 19:34:44.133] MEASUREMENT     | Seq 114: Position (0.516795, 0.041497), Samples: 437, Quality: POOR
+[2026-02-24 19:34:44.231] MEASUREMENT     | Seq 115: Position (0.516795, 0.24765), Samples: 504, Quality: POOR
+[2026-02-24 19:34:44.268] MEASUREMENT     | Seq 116: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:44.365] MEASUREMENT     | Seq 117: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:44.435] MEASUREMENT     | Seq 118: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:44.561] MEASUREMENT     | Seq 119: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:44.587] MEASUREMENT     | Seq 120: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:44.691] MEASUREMENT     | Seq 121: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:44.732] MEASUREMENT     | Seq 122: Position (0.516795, 0.05268), Samples: 386, Quality: POOR
+[2026-02-24 19:34:44.868] MEASUREMENT     | Seq 123: Position (0.516795, 0.05268), Samples: 577, Quality: POOR
+[2026-02-24 19:34:44.901] MEASUREMENT     | Seq 124: Position (0.516795, 6e-06), Samples: 598, Quality: POOR
+[2026-02-24 19:34:45.027] MEASUREMENT     | Seq 125: Position (0.516795, 6e-06), Samples: 598, Quality: POOR
+[2026-02-24 19:34:45.074] MEASUREMENT     | Seq 126: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:45.204] MEASUREMENT     | Seq 127: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:45.220] MEASUREMENT     | Seq 128: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:45.332] MEASUREMENT     | Seq 129: Position (0.516795, 6e-06), Samples: 569, Quality: POOR
+[2026-02-24 19:34:45.362] MEASUREMENT     | Seq 130: Position (0.516795, 0.038106), Samples: 590, Quality: POOR
+[2026-02-24 19:34:45.446] MEASUREMENT     | Seq 131: Position (0.516795, 0.025406), Samples: 599, Quality: POOR
+[2026-02-24 19:34:45.526] MEASUREMENT     | Seq 132: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:45.665] MEASUREMENT     | Seq 133: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:45.703] MEASUREMENT     | Seq 134: Position (0.516795, 0.025406), Samples: 581, Quality: POOR
+[2026-02-24 19:34:45.880] MEASUREMENT     | Seq 135: Position (0.516795, 0.025406), Samples: 599, Quality: POOR
+[2026-02-24 19:34:45.889] MEASUREMENT     | Seq 136: Position (0.516795, 0.025406), Samples: 598, Quality: POOR
+[2026-02-24 19:34:46.013] MEASUREMENT     | Seq 137: Position (0.516795, 0.025406), Samples: 598, Quality: POOR
+[2026-02-24 19:34:46.064] MEASUREMENT     | Seq 138: Position (0.516795, 0.025406), Samples: 599, Quality: POOR
+[2026-02-24 19:34:46.188] MEASUREMENT     | Seq 139: Position (0.516795, 0.025406), Samples: 599, Quality: POOR
+[2026-02-24 19:34:46.244] MEASUREMENT     | Seq 140: Position (0.516795, 0.025406), Samples: 598, Quality: POOR
+[2026-02-24 19:34:46.363] MEASUREMENT     | Seq 141: Position (0.516795, 0.025406), Samples: 598, Quality: POOR
+[2026-02-24 19:34:46.401] MEASUREMENT     | Seq 142: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.534] MEASUREMENT     | Seq 143: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.550] MEASUREMENT     | Seq 144: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.671] MEASUREMENT     | Seq 145: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.725] MEASUREMENT     | Seq 146: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.786] MEASUREMENT     | Seq 147: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.838] MEASUREMENT     | Seq 148: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:46.914] MEASUREMENT     | Seq 149: Position (0.516795, 0.025406), Samples: 178, Quality: POOR
+[2026-02-24 19:34:46.986] MEASUREMENT     | Seq 150: Position (0.516795, 0.025406), Samples: 598, Quality: POOR
+[2026-02-24 19:34:47.076] MEASUREMENT     | Seq 151: Position (0.516795, 0.025406), Samples: 132, Quality: POOR
+[2026-02-24 19:34:47.142] MEASUREMENT     | Seq 152: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:47.258] MEASUREMENT     | Seq 153: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:47.297] MEASUREMENT     | Seq 154: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:47.491] MEASUREMENT     | Seq 155: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:47.547] MEASUREMENT     | Seq 156: Position (0.515849, 0.31783), Samples: 103, Quality: POOR
+[2026-02-24 19:34:47.668] MEASUREMENT     | Seq 157: Position (0.515849, 0.31783), Samples: 596, Quality: POOR
+[2026-02-24 19:34:47.703] MEASUREMENT     | Seq 158: Position (0.515849, 0.31783), Samples: 595, Quality: POOR
+[2026-02-24 19:34:47.860] MEASUREMENT     | Seq 159: Position (0.515849, 0.31783), Samples: 589, Quality: POOR
+[2026-02-24 19:34:47.916] MEASUREMENT     | Seq 160: Position (0.515849, 0.29243), Samples: 596, Quality: POOR
+[2026-02-24 19:34:48.028] MEASUREMENT     | Seq 161: Position (0.515849, 0.29243), Samples: 585, Quality: GOOD
+[2026-02-24 19:34:48.094] MEASUREMENT     | Seq 162: Position (0.515849, 0.26703), Samples: 591, Quality: EXCELLENT
+[2026-02-24 19:34:48.270] MEASUREMENT     | Seq 163: Position (0.515849, 0.26703), Samples: 585, Quality: EXCELLENT
+[2026-02-24 19:34:48.300] MEASUREMENT     | Seq 164: Position (0.515849, 0.24163), Samples: 595, Quality: EXCELLENT
+[2026-02-24 19:34:48.445] MEASUREMENT     | Seq 165: Position (0.515849, 0.24163), Samples: 582, Quality: EXCELLENT
+[2026-02-24 19:34:48.495] MEASUREMENT     | Seq 166: Position (0.515849, 0.21623), Samples: 595, Quality: EXCELLENT
+[2026-02-24 19:34:48.644] MEASUREMENT     | Seq 167: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:48.680] MEASUREMENT     | Seq 168: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:48.806] MEASUREMENT     | Seq 169: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:48.845] MEASUREMENT     | Seq 170: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:48.929] MEASUREMENT     | Seq 171: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:48.984] MEASUREMENT     | Seq 172: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:49.122] MEASUREMENT     | Seq 173: Position (0.515849, 0.19083), Samples: 541, Quality: EXCELLENT
+[2026-02-24 19:34:49.166] MEASUREMENT     | Seq 174: Position (0.515849, 0.19083), Samples: 589, Quality: EXCELLENT
+[2026-02-24 19:34:49.292] MEASUREMENT     | Seq 175: Position (0.515849, 0.19083), Samples: 583, Quality: EXCELLENT
+[2026-02-24 19:34:49.345] MEASUREMENT     | Seq 176: Position (0.515849, 0.16543), Samples: 588, Quality: EXCELLENT
+[2026-02-24 19:34:49.442] MEASUREMENT     | Seq 177: Position (0.515849, 0.16543), Samples: 597, Quality: EXCELLENT
+[2026-02-24 19:34:49.517] MEASUREMENT     | Seq 178: Position (0.515849, 0.16543), Samples: 588, Quality: EXCELLENT
+[2026-02-24 19:34:49.665] MEASUREMENT     | Seq 179: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:49.710] MEASUREMENT     | Seq 180: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:49.857] MEASUREMENT     | Seq 181: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:49.911] MEASUREMENT     | Seq 182: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:50.057] MEASUREMENT     | Seq 183: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:50.117] MEASUREMENT     | Seq 184: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:50.235] MEASUREMENT     | Seq 185: Position (0.515849, 0.11463), Samples: 274, Quality: EXCELLENT
+[2026-02-24 19:34:50.303] MEASUREMENT     | Seq 186: Position (0.515849, 0.11463), Samples: 595, Quality: EXCELLENT
+[2026-02-24 19:34:50.411] MEASUREMENT     | Seq 187: Position (0.515849, 0.11463), Samples: 589, Quality: EXCELLENT
+[2026-02-24 19:34:50.507] MEASUREMENT     | Seq 188: Position (0.515849, 0.10193), Samples: 571, Quality: GOOD
+[2026-02-24 19:34:50.632] MEASUREMENT     | Seq 189: Position (0.515849, 0.08923), Samples: 592, Quality: EXCELLENT
+[2026-02-24 19:34:50.759] MEASUREMENT     | Seq 190: Position (0.515849, 0.08923), Samples: 586, Quality: GOOD
+[2026-02-24 19:34:50.906] MEASUREMENT     | Seq 191: Position (0.515849, 0.06383), Samples: 588, Quality: GOOD
+[2026-02-24 19:34:50.968] MEASUREMENT     | Seq 192: Position (0.515849, 0.06383), Samples: 585, Quality: GOOD
+[2026-02-24 19:34:51.175] MEASUREMENT     | Seq 193: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.183] MEASUREMENT     | Seq 194: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.319] MEASUREMENT     | Seq 195: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.392] MEASUREMENT     | Seq 196: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.543] MEASUREMENT     | Seq 197: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.604] MEASUREMENT     | Seq 198: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.740] MEASUREMENT     | Seq 199: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:51.814] MEASUREMENT     | Seq 200: Position (0.515849, 0.03843), Samples: 395, Quality: GOOD
+[2026-02-24 19:34:51.948] MEASUREMENT     | Seq 201: Position (0.515849, 0.03843), Samples: 590, Quality: GOOD
+[2026-02-24 19:34:52.044] MEASUREMENT     | Seq 202: Position (0.515849, 0.03843), Samples: 590, Quality: GOOD
+[2026-02-24 19:34:52.194] MEASUREMENT     | Seq 203: Position (0.515849, 0.03843), Samples: 587, Quality: GOOD
+[2026-02-24 19:34:52.276] MEASUREMENT     | Seq 204: Position (0.515849, 0.01303), Samples: 594, Quality: GOOD
+[2026-02-24 19:34:52.426] MEASUREMENT     | Seq 205: Position (0.515849, 0.01303), Samples: 589, Quality: GOOD
+[2026-02-24 19:34:52.506] MEASUREMENT     | Seq 206: Position (0.515849, 0.01303), Samples: 594, Quality: GOOD
+[2026-02-24 19:34:52.670] MEASUREMENT     | Seq 207: Position (0.515849, 0.00668), Samples: 591, Quality: GOOD
+[2026-02-24 19:34:52.750] MEASUREMENT     | Seq 208: Position (0.515849, 0.00668), Samples: 592, Quality: GOOD
+[2026-02-24 19:34:52.898] MEASUREMENT     | Seq 209: Position (0.515849, 0.00033), Samples: 584, Quality: GOOD
+[2026-02-24 19:34:52.943] MEASUREMENT     | Seq 210: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.135] MEASUREMENT     | Seq 211: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.279] MEASUREMENT     | Seq 212: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.401] MEASUREMENT     | Seq 213: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.545] MEASUREMENT     | Seq 214: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.687] MEASUREMENT     | Seq 215: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.811] MEASUREMENT     | Seq 216: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:53.933] MEASUREMENT     | Seq 217: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:54.075] MEASUREMENT     | Seq 218: Position (0.515849, -0.00602), Samples: 398, Quality: FAIR
+[2026-02-24 19:34:54.233] MEASUREMENT     | Seq 219: Position (0.515849, -0.00602), Samples: 592, Quality: FAIR
+[2026-02-24 19:34:54.366] MEASUREMENT     | Seq 220: Position (0.515849, -0.00602), Samples: 590, Quality: FAIR
+[2026-02-24 19:34:54.529] MEASUREMENT     | Seq 221: Position (0.515849, -0.01237), Samples: 586, Quality: FAIR
+[2026-02-24 19:34:54.704] MEASUREMENT     | Seq 222: Position (0.515849, -0.01237), Samples: 590, Quality: FAIR
+[2026-02-24 19:34:54.850] MEASUREMENT     | Seq 223: Position (0.515849, -0.01237), Samples: 595, Quality: FAIR
+[2026-02-24 19:34:54.991] MEASUREMENT     | Seq 224: Position (0.515849, -0.01237), Samples: 587, Quality: FAIR
+[2026-02-24 19:34:55.145] MEASUREMENT     | Seq 225: Position (0.515849, 0.01303), Samples: 588, Quality: GOOD
+[2026-02-24 19:34:55.262] MEASUREMENT     | Seq 226: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:55.377] MEASUREMENT     | Seq 227: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:55.484] MEASUREMENT     | Seq 228: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:55.586] MEASUREMENT     | Seq 229: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:55.692] MEASUREMENT     | Seq 230: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:55.794] MEASUREMENT     | Seq 231: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:55.914] MEASUREMENT     | Seq 232: Position (0.515849, 0.05113), Samples: 500, Quality: GOOD
+[2026-02-24 19:34:56.048] MEASUREMENT     | Seq 233: Position (0.515849, 0.05113), Samples: 557, Quality: GOOD
+[2026-02-24 19:34:56.164] MEASUREMENT     | Seq 234: Position (0.515849, 0.14003), Samples: 587, Quality: EXCELLENT
+[2026-02-24 19:34:56.284] MEASUREMENT     | Seq 235: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:56.381] MEASUREMENT     | Seq 236: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:34:56.489] MEASUREMENT     | Seq 237: Position (0.0, -0.013037), Samples: 113, Quality: POOR
+[2026-02-24 19:34:56.610] MEASUREMENT     | Seq 238: Position (0.0, 0.0), Samples: 595, Quality: POOR
+[2026-02-24 19:34:56.744] MEASUREMENT     | Seq 239: Position (0.0, 0.0), Samples: 590, Quality: POOR
+[2026-02-24 19:34:56.863] MEASUREMENT     | Seq 240: Position (0.0, 0.0), Samples: 594, Quality: POOR
+[2026-02-24 19:35:00.917] MEASUREMENT     | Seq 241: Position (0.0, 0.0), Samples: 327, Quality: POOR
+[2026-02-24 19:36:00.746] MEASUREMENT     | Seq 242: Position ( N/A, N/A), Samples: 0, Quality: POOR
+[2026-02-24 19:37:00.845] MEASUREMENT     | Seq 243: Position (0.0, 0.0), Samples: 302, Quality: POOR
+[2026-02-24 19:38:00.985] MEASUREMENT     | Seq 244: Position (0.0, 0.0), Samples: 593, Quality: POOR
+[2026-02-24 19:39:01.067] MEASUREMENT     | Seq 245: Position (0.0, 0.0), Samples: 587, Quality: POOR
+[2026-02-24 19:40:00.830] MEASUREMENT     | Seq 246: Position (0.0, 0.0), Samples: 592, Quality: POOR

@@ -4,3 +4,20 @@ grid:
   x_spacing_feet: 0.1
   y_spacing_feet: 0.05
 max_sampling_duration_sec: 20.0
+
+# Cross-section automation defaults
+automation:
+  default_dwell_time_sec: 60.0
+  movement_settling_time_sec: 2.0
+  default_vertical_points: 10
+  default_horizontal_points: 15
+  default_grid_x_points: 10
+  default_grid_y_points: 8
+
+# Session management configuration
+sessions:
+  base_output_dir: "Data_Output"
+  auto_create_on_start: true
+  archive_raw_exports: true
+  generate_plots: false  # Future feature
+  default_operator: ""

@@ -6,6 +6,8 @@ Simple implementation matching reference code exactly.
 import serial
 import time
 import logging
+import re
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,12 @@ class VXCController:
         self.timeout = timeout
         self.ser = None
         self.online = False
+        self.last_command_error: Optional[str] = None
+        self.lock = threading.Lock()
+        
+        # Remember successful terminator for position queries (optimization)
+        self._position_terminator = ''  # Will be determined on first success
+        self._position_terminator_locked = False
         
     def connect(self) -> bool:
         """Establish serial connection to VXC controller.
@@ -68,13 +76,20 @@ class VXCController:
         """Alias for disconnect() for compatibility."""
         self.disconnect()
     
-    def send_command(self, command: str, wait_for_response: bool = False, response_type: str = 'ready') -> Optional[str]:
+    def send_command(
+        self,
+        command: str,
+        wait_for_response: bool = False,
+        response_type: str = 'ready',
+        terminator: str = ''
+    ) -> Optional[str]:
         """Send command to VXC controller.
         
         Args:
             command: Command string to send
             wait_for_response: Whether to wait for a response
             response_type: Type of response expected ('ready', 'value', 'status')
+            terminator: Optional command terminator (e.g. '\r' or '\r\n')
             
         Returns:
             Response string if wait_for_response=True, otherwise None
@@ -84,42 +99,53 @@ class VXCController:
             return None
         
         try:
-            # Clear any pending data
-            self.ser.reset_input_buffer()
-            
-            # Send command
-            self.ser.write(command.encode('ascii'))
-            self.ser.flush()
-            logger.debug(f"→ {command}")
-            
-            if wait_for_response:
-                response = ""
-                start_time = time.time()
+            with self.lock:
+                self.last_command_error = None
+                # Clear any pending data - both input and output buffers
+                self.ser.reset_input_buffer()
+                self.ser.reset_output_buffer()
+                time.sleep(0.02)  # 20ms delay to ensure buffers are truly clear
                 
-                while True:
-                    if self.ser.in_waiting > 0:
-                        char = self.ser.read(1).decode('ascii', errors='ignore')
-                        response += char
-                        
-                        # Check for completion characters
-                        if response_type == 'ready' and '^' in response:
+                # Drain any residual data that arrived after buffer reset
+                while self.ser.in_waiting > 0:
+                    self.ser.read(self.ser.in_waiting)
+                    time.sleep(0.005)
+
+                # Send command
+                self.ser.write((command + terminator).encode('ascii'))
+                self.ser.flush()
+                logger.debug(f"→ {command}")
+
+                if wait_for_response:
+                    response = ""
+                    start_time = time.time()
+
+                    while True:
+                        if self.ser.in_waiting > 0:
+                            char = self.ser.read(1).decode('ascii', errors='ignore')
+                            response += char
+
+                            # Check for completion characters
+                            if response_type == 'ready' and '^' in response:
+                                break
+                            elif response_type == 'value' and ('\r' in response or '^' in response):
+                                break
+                            elif response_type == 'status' and char in ['B', 'R', 'J', 'b', 'F']:
+                                break
+
+                        # Timeout check
+                        if time.time() - start_time > self.timeout:
+                            logger.warning(f"Timeout waiting for response to '{command}' (timeout={self.timeout:.1f}s, elapsed={time.time()-start_time:.2f}s)")
                             break
-                        elif response_type == 'value' and '\r' in response:
-                            break
-                        elif response_type == 'status' and char in ['B', 'R', 'J', 'b', 'F']:
-                            break
-                    
-                    # Timeout check
-                    if time.time() - start_time > self.timeout:
-                        logger.warning(f"Timeout waiting for response")
-                        break
-                
-                logger.debug(f"← {response.strip()}")
-                return response.strip()
-            
-            return None
+
+                    elapsed = time.time() - start_time
+                    logger.debug(f"← {response.strip()} ({elapsed:.3f}s)")
+                    return response.strip()
+
+                return None
             
         except Exception as e:
+            self.last_command_error = str(e)
             logger.error(f"Command error: {e}")
             return None
     
@@ -171,7 +197,7 @@ class VXCController:
             return None
     
     def get_position(self, motor: int = 1) -> Optional[int]:
-        """Get current motor position.
+        """Get current motor position with optimized terminator handling.
         
         Args:
             motor: Motor number (1-4)
@@ -185,19 +211,67 @@ class VXCController:
             logger.error(f"Invalid motor number: {motor}")
             return None
         
-        response = self.send_command(position_commands[motor], 
-                                     wait_for_response=True, 
-                                     response_type='value')
+        # If we've determined the working terminator, try it first (optimization)
+        if self._position_terminator_locked:
+            response = self.send_command(
+                position_commands[motor],
+                wait_for_response=True,
+                response_type='value',
+                terminator=self._position_terminator
+            )
+            
+            if response:
+                return self._parse_position_response(response, motor)
+            # If it failed, fall back to trying all terminators
+            else:
+                logger.warning(f"Cached terminator failed for motor {motor}, trying all terminators")
+                self._position_terminator_locked = False  # Reset to re-learn
         
-        if response:
-            try:
-                position = int(response.strip())
-                logger.debug(f"Motor {motor} position: {position}")
-                return position
-            except ValueError:
-                logger.error(f"Invalid position response: {response}")
-                return None
+        # Try all terminators to find one that works
+        response = None
+        terminators = ['', '\r', '\r\n', '\n']
+        for terminator in terminators:
+            response = self.send_command(
+                position_commands[motor],
+                wait_for_response=True,
+                response_type='value',
+                terminator=terminator
+            )
+            if response:
+                # Lock in this terminator for future use
+                if not self._position_terminator_locked:
+                    self._position_terminator = terminator
+                    self._position_terminator_locked = True
+                    logger.info(f"Locked position query terminator: {repr(terminator)}")
+                
+                return self._parse_position_response(response, motor)
+            time.sleep(0.05)
+        
+        logger.warning(f"No position response for motor {motor}")
         return None
+    
+    def _parse_position_response(self, response: str, motor: int) -> Optional[int]:
+        """Parse position from response string.
+        
+        Args:
+            response: Response string from controller
+            motor: Motor number for logging
+            
+        Returns:
+            Position as integer, or None if cannot parse
+        """
+        try:
+            position = int(response.strip())
+            logger.debug(f"Motor {motor} position: {position}")
+            return position
+        except ValueError:
+            match = re.search(r"-?\d+", response)
+            if match:
+                position = int(match.group(0))
+                logger.debug(f"Motor {motor} position (parsed): {position}")
+                return position
+            logger.error(f"Invalid position response: {response}")
+            return None
     
     def zero_position(self) -> None:
         """Zero all motor positions."""
@@ -222,6 +296,9 @@ class VXCController:
             logger.error("Must be online to send motion commands")
             return False
         
+        # Log the exact parameters for diagnostics
+        logger.info(f"step_motor called: motor={motor}, steps={steps:+d}, speed={speed}, accel={acceleration}, timeout={self.timeout:.1f}s")
+        
         # Clear previous commands
         self.clear_program()
         
@@ -237,17 +314,24 @@ class VXCController:
         index_cmd = f'I{motor}M{steps},'
         self.send_command(index_cmd)
         
-        logger.info(f"Commands sent: Motor {motor}, {steps} steps at {speed} steps/sec")
+        logger.info(f"Commands queued: Motor {motor}, {steps:+d} steps @ {speed} steps/sec")
         
         # Run the program
         response = self.send_command('R', wait_for_response=wait, response_type='ready')
         
-        if wait and response and '^' in response:
-            logger.info("Movement complete")
-            return True
-        elif wait:
-            logger.warning("Movement may not have completed properly")
-            return False
+        if wait:
+            if response and '^' in response:
+                logger.info(f"Movement complete: Motor {motor} moved {steps:+d} steps successfully")
+                return True
+            elif response and 'F' in response:
+                logger.error(f"Movement FAILED: Controller in FAULT state (response: {response})")
+                return False
+            elif response:
+                logger.warning(f"Movement uncertain: Unexpected response '{response}' (no '^' found)")
+                return False
+            else:
+                logger.error(f"Movement FAILED: No response from controller (timeout={self.timeout:.1f}s)")
+                return False
         
         return True
     
@@ -283,3 +367,116 @@ class VXCController:
                 dy = int(y - current_y)
                 if dy != 0:
                     self.step_motor(motor=2, steps=dy)
+    
+    def jog_to(self, target_x: int, target_y: int, speed: int = 2000, acceleration: int = 2) -> bool:
+        """Jog to target position: X axis first, then Y axis.
+        
+        Moves the stage from its current position to the target position by:
+        1. Moving along X axis to target X position
+        2. Then moving along Y axis to target Y position
+        
+        Args:
+            target_x: Target X position in steps
+            target_y: Target Y position in steps
+            speed: Movement speed in steps/second (1-6000, default: 2000)
+            acceleration: Acceleration value (0-127, default: 2)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.online:
+            logger.error("Must be online to jog")
+            return False
+        
+        # Check controller status before moving
+        status = self.verify_status()
+        if status == 'B':
+            logger.warning("Controller reports BUSY status before jog - waiting 2s")
+            time.sleep(2.0)
+            status = self.verify_status()
+        if status == 'F':
+            logger.error("Cannot jog: Controller in FAULT state")
+            return False
+        if status not in ['R', 'J']:
+            logger.warning(f"Controller status unclear before jog: '{status}'")
+        
+        # Save original timeout
+        original_timeout = self.timeout
+        
+        # Get current position (Motor 2 = X-axis, Motor 1 = Y-axis)
+        current_x = self.get_position(motor=2)
+        current_y = self.get_position(motor=1)
+        
+        if current_x is None or current_y is None:
+            logger.error("Cannot jog: unable to read current position")
+            return False
+        
+        # Calculate required movement
+        dx = target_x - current_x
+        dy = target_y - current_y
+        
+        logger.info(f"=== JOG START: ({current_x}, {current_y}) → ({target_x}, {target_y}) ===")
+        logger.info(f"Movement delta: X={dx:+d} steps, Y={dy:+d} steps")
+        
+        # Calculate timeout with enhanced safety margins:
+        # Base time + 8 second buffer + 2x safety multiplier, minimum 10 seconds
+        safety_multiplier = 2.0
+        max_move_time_x = ((abs(dx) / max(speed, 1)) + 8.0) * safety_multiplier if dx != 0 else 0
+        max_move_time_y = ((abs(dy) / max(speed, 1)) + 8.0) * safety_multiplier if dy != 0 else 0
+        max_move_time_x = max(max_move_time_x, 10.0) if dx != 0 else 0
+        max_move_time_y = max(max_move_time_y, 10.0) if dy != 0 else 0
+        
+        logger.info(f"Calculated timeouts: X={max_move_time_x:.1f}s, Y={max_move_time_y:.1f}s")
+        
+        try:
+            # Move X axis first (Motor 2)
+            if dx != 0:
+                logger.info(f"[X-AXIS] Moving Motor 2: {dx:+d} steps (timeout: {max_move_time_x:.1f}s)")
+                # Set timeout for this movement
+                self.timeout = max_move_time_x
+                move_start = time.time()
+                
+                if not self.step_motor(motor=2, steps=dx, speed=speed, acceleration=acceleration, wait=True):
+                    logger.error(f"[X-AXIS] Movement FAILED after {time.time()-move_start:.2f}s")
+                    self.timeout = original_timeout
+                    return False
+                    
+                logger.info(f"[X-AXIS] Movement complete in {time.time()-move_start:.2f}s")
+                time.sleep(0.15)  # Brief pause between axes
+            else:
+                logger.info("[X-AXIS] Already at target position")
+            
+            # Then move Y axis (Motor 1)
+            if dy != 0:
+                logger.info(f"[Y-AXIS] Moving Motor 1: {dy:+d} steps (timeout: {max_move_time_y:.1f}s)")
+                # Set timeout for this movement
+                self.timeout = max_move_time_y
+                move_start = time.time()
+                
+                if not self.step_motor(motor=1, steps=dy, speed=speed, acceleration=acceleration, wait=True):
+                    logger.error(f"[Y-AXIS] Movement FAILED after {time.time()-move_start:.2f}s")
+                    self.timeout = original_timeout
+                    return False
+                    
+                logger.info(f"[Y-AXIS] Movement complete in {time.time()-move_start:.2f}s")
+                time.sleep(0.15)  # Brief pause after movement
+            else:
+                logger.info("[Y-AXIS] Already at target position")
+            
+            # Verify final position
+            final_x = self.get_position(motor=2)
+            final_y = self.get_position(motor=1)
+            if final_x is not None and final_y is not None:
+                logger.info(f"=== JOG COMPLETE: Final position ({final_x}, {final_y}) ===")
+                pos_error_x = abs(final_x - target_x)
+                pos_error_y = abs(final_y - target_y)
+                if pos_error_x > 10 or pos_error_y > 10:
+                    logger.warning(f"Position error exceeds tolerance: X_err={pos_error_x}, Y_err={pos_error_y}")
+            else:
+                logger.warning("=== JOG COMPLETE: Could not verify final position ===")
+            
+            return True
+            
+        finally:
+            # Always restore original timeout
+            self.timeout = original_timeout

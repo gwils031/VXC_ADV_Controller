@@ -1,0 +1,17 @@
+{
+  "SerialPortNumber": 9,
+  "SamplingRate (Hz)": 10.0,
+  "VelocityRange": 1,
+  "RunAutomatedBeamCheckOnStart": true,
+  "UsePressureSensor": false,
+  "PressureSensorCalibrationIntervalMinutes": 10,
+  "SiteLatitude": null,
+  "SiteAltitude (m)": null,
+  "Salinity (PSS-78)": 0.0,
+  "TemperatureOverride (C)": null,
+  "SoundSpeedOverride (m/s)": null,
+  "MountingCorrection": 1.0,
+  "FileLoggingLocation": "C:\\App Development\\ADV&VXC Controller\\ADV_Data",
+  "FileLoggingMinutesPerFile": 1,
+  "FileLoggingIntervalSnapping": true
+}

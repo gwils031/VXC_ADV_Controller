@@ -4,7 +4,7 @@ A modular Python application for adaptive flow velocity profiling in flumes usin
 
 ## Features
 
-- **Hardware Control**: Velmex VXC XY stage via ASCII serial protocol, SonTek FlowTracker2 10Hz velocity streaming
+- **Hardware Control**: Velmex VXC XY stage via ASCII serial protocol, SonTek FlowTracker2 CSV export file integration
 - **Adaptive Sampling**: Froude number-based sampling density adjustment for supercritical flow regions
 - **Calibration**: Interactive press-and-hold jogging with automatic grid generation from origin/boundary points
 - **State Management**: Pause/resume/stop with complete data preservation across sessions

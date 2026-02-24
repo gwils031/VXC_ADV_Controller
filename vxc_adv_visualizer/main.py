@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication
 
-from gui.main_window import MainWindow
+from vxc_adv_visualizer.gui.main_window import MainWindow
 
 # Configure logging
 logging.basicConfig(

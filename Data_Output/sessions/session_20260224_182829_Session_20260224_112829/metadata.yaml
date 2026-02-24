@@ -1,0 +1,42 @@
+session_info:
+  session_id: session_20260224_182829_Session_20260224_112829
+  session_name: Session_20260224_112829
+  start_time_utc: '2026-02-24 18:28:29'
+  end_time_utc: '2026-02-24 18:43:00'
+  duration_minutes: 14.51
+  operator: Unknown
+  notes: ''
+experiment_parameters:
+  scan_type: Manual
+  grid_spacing_x_m: null
+  grid_spacing_y_m: null
+  dwell_time_sec: null
+  settling_time_sec: null
+measurement_plan:
+  start_position: null
+  end_position: null
+  point_count_x: null
+  point_count_y: null
+  scan_pattern: raster
+environmental_conditions:
+  water_temperature_c: null
+  flow_conditions: ''
+statistics:
+  total_measurements: 131
+  valid_measurements: 0
+  total_samples: 71401
+  matched_samples: 43533
+  match_rate_percent: 60.97
+quality_summary:
+  excellent_points: 0
+  good_points: 0
+  fair_points: 0
+  poor_points: 0
+data_files:
+  averaged_grid_data: averaged_grid_data.csv
+  raw_measurements: raw_measurements.csv
+  session_log: session_log.txt
+software:
+  application: VXC/ADV Visualizer
+  version: 1.0.0
+  python_version: 3.11+

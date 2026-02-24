@@ -1,0 +1,17 @@
+session_info:
+  session_id: session_20260224_194154_Session_20260224_124120
+  session_name: Session_20260224_124120
+  start_time_utc: '2026-02-24 19:41:54'
+  status: ACTIVE
+  duration_minutes: 2.9
+  operator: ''
+  notes: Flow Profile automated.
+experiment_parameters:
+  scan_type: Manual
+  grid_spacing_x_m: null
+  grid_spacing_y_m: null
+  dwell_time_sec: null
+  settling_time_sec: null
+statistics:
+  total_measurements: 3
+  total_samples: 1774
