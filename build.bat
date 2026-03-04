@@ -2,6 +2,9 @@
 REM Build script for VXC/ADV Visualizer executable
 REM Creates a standalone Windows application in dist\VXC_ADV_Visualizer\
 
+REM ---- Version number - bump this before each release ----
+set VERSION=1.0.0
+
 echo ========================================
 echo VXC/ADV Visualizer - Build Executable
 echo ========================================
@@ -77,6 +80,20 @@ if exist "app_icon.ico" (
     copy /Y "app_icon.ico" "dist\VXC_ADV_Visualizer\app_icon.ico" >nul
 )
 
+REM -----------------------------------------------------------------------
+REM Zip the distribution folder for GitHub Releases upload
+REM -----------------------------------------------------------------------
+echo.
+echo Creating release zip...
+set ZIP_NAME=VXC_ADV_Visualizer_v%VERSION%.zip
+if exist "dist\%ZIP_NAME%" del /Q "dist\%ZIP_NAME%"
+powershell -NoProfile -Command "Compress-Archive -Path 'dist\VXC_ADV_Visualizer' -DestinationPath 'dist\%ZIP_NAME%' -Force"
+if errorlevel 1 (
+    echo WARNING: Zip creation failed - folder is still distributable manually.
+) else (
+    echo Created: dist\%ZIP_NAME%
+)
+
 echo.
 echo ========================================
 echo BUILD SUCCESSFUL
@@ -84,9 +101,14 @@ echo ========================================
 echo.
 echo Executable:   dist\VXC_ADV_Visualizer\VXC_ADV_Visualizer.exe
 echo Config:       dist\VXC_ADV_Visualizer\config\
+echo Release zip:  dist\%ZIP_NAME%
 echo.
-echo To distribute: copy the entire dist\VXC_ADV_Visualizer\ folder.
-echo   Edit config\vxc_config.yaml on each machine to set the correct COM port.
+echo To publish a GitHub Release:
+echo   1. Go to https://github.com/gwils031/VXC_ADV_Controller/releases/new
+echo   2. Set tag: v%VERSION%
+echo   3. Upload: dist\%ZIP_NAME%
+echo   4. Publish
 echo.
+echo Recipients: unzip, edit config\vxc_config.yaml (COM port), run the exe.
 
 pause
