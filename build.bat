@@ -1,17 +1,19 @@
 @echo off
 REM Build script for VXC/ADV Visualizer executable
-REM This creates a standalone Windows application
+REM Creates a standalone Windows application in dist\VXC_ADV_Visualizer\
 
 echo ========================================
 echo VXC/ADV Visualizer - Build Executable
 echo ========================================
 echo.
 
+REM Must run from the workspace root (where run.py lives)
+cd /d "%~dp0"
+
 REM Check if PyInstaller is installed
 python -c "import PyInstaller" 2>nul
 if errorlevel 1 (
-    echo PyInstaller is not installed!
-    echo Installing PyInstaller...
+    echo PyInstaller is not installed. Installing...
     pip install pyinstaller
     if errorlevel 1 (
         echo ERROR: Failed to install PyInstaller
@@ -25,8 +27,24 @@ if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 
 echo.
+echo Checking for app icon...
+if exist "app_icon.png" (
+    if not exist "app_icon.ico" (
+        echo Converting app_icon.png to app_icon.ico...
+        python make_icon.py
+        if errorlevel 1 (
+            echo WARNING: Icon conversion failed - building without icon
+        )
+    ) else (
+        echo app_icon.ico already exists, skipping conversion.
+    )
+) else (
+    echo No app_icon.png found - building without icon.
+)
+
+echo.
 echo Building executable with PyInstaller...
-echo This may take a few minutes...
+echo This may take 3-5 minutes...
 echo.
 
 pyinstaller build_exe.spec
@@ -34,23 +52,41 @@ pyinstaller build_exe.spec
 if errorlevel 1 (
     echo.
     echo ========================================
-    echo BUILD FAILED!
+    echo BUILD FAILED
+    echo Check the output above for errors.
     echo ========================================
     pause
     exit /b 1
 )
 
+REM -----------------------------------------------------------------------
+REM Seed the writable config directory beside the exe.
+REM
+REM The app reads config from ./config/ (CWD-relative) first, falling back
+REM to the frozen _internal/ bundle copy. Users can edit the file beside
+REM the .exe to change COM port, dwell times, etc. without rebuilding.
+REM Boundary saves also write here.
+REM -----------------------------------------------------------------------
+echo.
+echo Seeding writable config directory...
+if not exist "dist\VXC_ADV_Visualizer\config" mkdir "dist\VXC_ADV_Visualizer\config"
+xcopy /Y /Q "vxc_adv_visualizer\config\*.yaml" "dist\VXC_ADV_Visualizer\config\"
+
+REM Copy icon beside the exe so Windows shortcuts pick it up automatically
+if exist "app_icon.ico" (
+    copy /Y "app_icon.ico" "dist\VXC_ADV_Visualizer\app_icon.ico" >nul
+)
+
 echo.
 echo ========================================
-echo BUILD SUCCESSFUL!
+echo BUILD SUCCESSFUL
 echo ========================================
 echo.
-echo The executable is located in:
-echo   dist\VXC_ADV_Visualizer\
+echo Executable:   dist\VXC_ADV_Visualizer\VXC_ADV_Visualizer.exe
+echo Config:       dist\VXC_ADV_Visualizer\config\
 echo.
-echo To run: dist\VXC_ADV_Visualizer\VXC_ADV_Visualizer.exe
-echo.
-echo To distribute: Copy the entire "dist\VXC_ADV_Visualizer" folder
+echo To distribute: copy the entire dist\VXC_ADV_Visualizer\ folder.
+echo   Edit config\vxc_config.yaml on each machine to set the correct COM port.
 echo.
 
 pause

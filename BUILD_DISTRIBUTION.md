@@ -1,222 +1,232 @@
-# Building Distributable Executable
+# Building a Distributable Executable
 
-This guide explains how to create a standalone executable of the VXC/ADV Visualizer application that can be run on other Windows computers without requiring Python installation.
+Creates a standalone Windows `.exe` that runs on any Windows 10/11 machine
+without requiring Python, pip, or any packages to be installed.
 
-## Quick Start
+---
 
-### Option 1: Using the Build Script (Easiest)
+## Quick Build
 
-1. **Double-click `build.bat`**
-2. Wait for the build to complete (~2-5 minutes)
-3. Find your application in `dist\VXC_ADV_Visualizer\`
+1. **Double-click `build.bat`** from the workspace root (or run it in a terminal).
+2. Wait ~3–5 minutes for PyInstaller to finish.
+3. Find the output in `dist\VXC_ADV_Visualizer\`.
 
-### Option 2: Manual Build
+That's it. The batch script handles PyInstaller installation, cleaning old
+builds, bundling, and seeding the writable config directory.
 
-1. **Install PyInstaller** (if not already installed):
-   ```bash
-   pip install pyinstaller
-   ```
+---
 
-2. **Run the build command**:
-   ```bash
-   pyinstaller build_exe.spec
-   ```
+## How the Build Works
 
-3. **Find the output** in `dist\VXC_ADV_Visualizer\`
+### Entry point: `run.py`
 
-## Distributing the Application
+PyInstaller is pointed at `run.py` (workspace root), not at
+`vxc_adv_visualizer/main.py` directly.
 
-### What to Share
+`run.py` is a 5-line shim:
 
-Copy the **entire folder** `dist\VXC_ADV_Visualizer\` which contains:
-- `VXC_ADV_Visualizer.exe` - The main executable
-- All required DLL files and dependencies
-- `config\` folder with default configuration
-- Other necessary runtime files
+```python
+from vxc_adv_visualizer.main import main
+import sys
+sys.exit(main())
+```
 
-### Packaging for Distribution
+This matters because `vxc_adv_visualizer/main.py` uses absolute package
+imports (`from vxc_adv_visualizer.gui...`). PyInstaller needs to see the
+project root on the path during analysis — `run.py` living outside the package
+achieves this. Running `python -m vxc_adv_visualizer.main` in development
+works for the same reason.
 
-**Option A: ZIP File** (Recommended)
-1. Right-click the `dist\VXC_ADV_Visualizer` folder
-2. Select "Send to" → "Compressed (zipped) folder"
-3. Share the resulting `.zip` file
+**Do not move `run.py` into the `vxc_adv_visualizer/` sub-folder.**
 
-**Option B: Installer** (Advanced)
-Use tools like:
-- **Inno Setup** (free): https://jrsoftware.org/isinfo.php
-- **NSIS** (free): https://nsis.sourceforge.io/
-- **Advanced Installer** (paid): https://www.advancedinstaller.com/
+### Manual build command
 
-### Folder Structure After Build
+```powershell
+pyinstaller build_exe.spec
+```
+
+Run from the workspace root (`C:\App Development\ADV&VXC Controller\`).
+
+---
+
+## Output Structure (PyInstaller 6+)
 
 ```
 dist\VXC_ADV_Visualizer\
-├── VXC_ADV_Visualizer.exe  ← Main executable
-├── config\                  ← Configuration files
-│   ├── adv_config.yaml
+├── VXC_ADV_Visualizer.exe      ← Double-click to launch
+├── config\                     ← Writable settings (edit these, not _internal)
 │   ├── experiment_config.yaml
 │   └── vxc_config.yaml
-├── PyQt5\                   ← PyQt5 libraries
-├── numpy\                   ← Numpy libraries
-├── *.dll                    ← Required DLLs
-└── ... (other dependencies)
+└── _internal\                  ← All bundled Python, DLLs, packages (don't touch)
+    ├── vxc_adv_visualizer\
+    │   └── config\             ← Read-only fallback copies of config files
+    ├── PyQt5\
+    ├── matplotlib\
+    ├── numpy\
+    ├── ...
 ```
+
+> **PyInstaller 6 note**: All dependency files now live in `_internal\` rather
+> than flat next to the exe. The exe itself just bootstraps and hands off to
+> `_internal`. This is normal — distribute the whole `VXC_ADV_Visualizer\` folder.
+
+---
+
+## Configuration Files in the Distribution
+
+Two copies of each YAML config exist in the dist:
+
+| Location | Purpose |
+|----------|---------|
+| `dist\VXC_ADV_Visualizer\config\` | **Writable** — edit this on each machine |
+| `dist\VXC_ADV_Visualizer\_internal\vxc_adv_visualizer\config\` | Read-only fallback inside the bundle |
+
+The app always reads from `./config/` (beside the `.exe`) first. If that file
+is missing it falls back to the frozen copy. Boundary saves and any config
+changes write to `./config/`.
+
+**Each deployment machine should edit `config\vxc_config.yaml` to set the
+correct COM port:**
+
+```yaml
+port: COM8      # Change to the actual port on this PC
+baudrate: 57600
+```
+
+---
+
+## Distributing the Application
+
+### What to share
+
+Copy or zip the **entire** `dist\VXC_ADV_Visualizer\` folder. Do not share
+just the `.exe` — it will not run without `_internal\`.
+
+### Packaging options
+
+**ZIP (recommended)**
+1. Right-click `dist\VXC_ADV_Visualizer` → "Send to" → "Compressed (zipped) folder".
+2. Share the `.zip`.
+
+**Installer (optional)**
+- [Inno Setup](https://jrsoftware.org/isinfo.php) (free)
+- [NSIS](https://nsis.sourceforge.io/) (free)
+
+---
 
 ## Running on Another Computer
 
-### System Requirements
-- **OS**: Windows 10 or later (64-bit)
-- **RAM**: Minimum 4GB, 8GB recommended
-- **Disk Space**: ~200MB for application + space for data
-- **Ports**: USB ports for VXC controller and ADV sensor
-- **Drivers**: USB serial drivers (usually automatic)
+### System requirements (end-user machine)
 
-### Installation Steps for End Users
+- Windows 10 or 11 (64-bit)
+- No Python installation needed
+- USB serial drivers (usually installed automatically by Windows)
+- ~300 MB free disk space
 
-1. **Extract the ZIP file** to any location (e.g., `C:\Program Files\VXC_ADV_Visualizer\`)
+### Steps
 
-2. **Run the executable**:
-   - Navigate to the extracted folder
-   - Double-click `VXC_ADV_Visualizer.exe`
-   - Windows may show a security warning (click "More info" → "Run anyway")
+1. Extract the ZIP to any location, e.g. `C:\VXC_ADV_Visualizer\`.
+2. Edit `config\vxc_config.yaml` and set the correct `port:` for this computer.
+3. Double-click `VXC_ADV_Visualizer.exe`.
+4. If Windows SmartScreen warns about an unknown publisher:
+   - Click **More info** → **Run anyway**.
 
-3. **First-time setup**:
-   - The application creates necessary folders on first run:
-     - `Data_Output\` - For merged data
-     - `VXC_Positions\` - For VXC position logs
-     - `ADV_Data\` - For ADV exports
-     - `vxc_adv_system.log` - Application log file
+### First-run folder creation
 
-### Windows Security Warning
+On first launch the app creates these folders beside the exe if they don't exist:
 
-When users first run the `.exe`, Windows SmartScreen may display a warning:
-- Click "More info"
-- Click "Run anyway"
+```
+VXC_ADV_Visualizer\
+├── ADV_Data\           ← Drop FlowTracker2 CSV exports here
+├── VXC_Positions\      ← VXC position logs are written here
+├── Data_Output\        ← Merged/averaged session output
+└── vxc_adv_system.log  ← Rotating log (5 MB × 3 backups)
+```
 
-**To avoid this** (optional):
-- Sign the executable with a code signing certificate
-- Build reputation over time with Microsoft SmartScreen
+---
 
 ## Troubleshooting Build Issues
 
-### Issue: "Module not found" errors
+### "ModuleNotFoundError" or import error in build output
 
-**Solution**: Add missing module to `hiddenimports` in `build_exe.spec`:
+Add the missing module to `hidden_imports` in `build_exe.spec`:
+
 ```python
 hidden_imports = [
-    'PyQt5.QtCore',
-    'your_missing_module',  # Add here
+    ...
+    'your.missing.module',
 ]
 ```
 
-### Issue: Config files not included
+Then rerun `build.bat`.
 
-**Solution**: Update `added_files` in `build_exe.spec`:
+### Config files not found at runtime
+
+The spec copies `vxc_adv_visualizer/config` into the bundle automatically.
+If a new YAML config was added to a different path, add it to `added_files`
+in `build_exe.spec`:
+
 ```python
 added_files = [
-    ('config', 'config'),
-    ('your_folder', 'your_folder'),  # Add here
+    ('vxc_adv_visualizer/config', 'vxc_adv_visualizer/config'),
+    ('your/new/config', 'your/new/config'),
+    ...
 ]
 ```
 
-### Issue: Executable too large
+### Antivirus false positive
 
-**Solution**: 
-1. Use `--onefile` for single executable (slower startup)
-2. Enable UPX compression (already enabled in spec file)
-3. Exclude unused modules in spec file
+- Add an exception in the antivirus software.
+- Or sign the exe with a code-signing certificate.
+- Submit to the AV vendor as a false positive.
 
-### Issue: Antivirus false positive
+### Build produces errors about UPX
 
-**Solution**:
-- Add exception in antivirus software
-- Sign the executable with code signing certificate
-- Submit to antivirus vendors as false positive
+UPX is optional. If it causes issues, set `upx=False` in both the `EXE` and
+`COLLECT` blocks in `build_exe.spec`.
 
-## Advanced Options
+---
 
-### Single-File Executable
+## Adding the Application Icon
 
-To create a single `.exe` file instead of a folder, modify `build_exe.spec`:
+The icon is embedded in the `.exe` and also shown in the Windows taskbar and
+Alt+Tab switcher.
 
-```python
-exe = EXE(
-    pyd,
-    a.scripts,
-    a.binaries,      # Add this
-    a.zipfiles,      # Add this
-    a.datas,         # Add this
-    [],
-    name='VXC_ADV_Visualizer',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,
-    # Remove these:
-    # exclude_binaries=True,
-)
+### Steps
 
-# Remove COLLECT block
-```
+1. **Save the icon image** as `app_icon.png` in the workspace root
+   (`C:\App Development\ADV&VXC Controller\app_icon.png`).
+   The image should be square; 1024×1024 px or 512×512 px is ideal.
 
-**Note**: Single-file mode:
-- ✅ Easier to distribute (one file)
-- ❌ Slower startup (extracts to temp folder)
-- ❌ Larger file size
-
-### Adding an Icon
-
-1. Create or find a `.ico` file
-2. Place it in the project root (e.g., `app_icon.ico`)
-3. Update `build_exe.spec`:
-   ```python
-   exe = EXE(
-       ...
-       icon='app_icon.ico',
-   )
+2. **Run the conversion script** to produce a multi-size `.ico`:
+   ```powershell
+   python make_icon.py
    ```
+   This creates `app_icon.ico` with sizes 16 × 16 through 256 × 256, which
+   Windows uses depending on context (taskbar, Start menu, file Explorer).
 
-### Build Size Optimization
+3. **Rebuild** — `build.bat` automatically detects `app_icon.png`, generates
+   `app_icon.ico` if it is missing, then passes it to PyInstaller.
+   You do not need to run `make_icon.py` manually before each build.
 
-Typical build size: **150-250 MB**
+`build_exe.spec` picks up the icon automatically:
 
-To reduce size:
-1. Remove unused dependencies from `requirements.txt`
-2. Use virtual environment with minimal packages
-3. Exclude test/development dependencies
-4. Enable UPX compression (already enabled)
-
-## Continuous Deployment
-
-### Automated Builds
-
-Create a GitHub Actions workflow or use:
-```bash
-# Build and package in one command
-build.bat && cd dist && tar -a -c -f VXC_ADV_Visualizer.zip VXC_ADV_Visualizer
-```
-
-### Version Management
-
-Add version info to `build_exe.spec`:
 ```python
-exe = EXE(
-    ...
-    name='VXC_ADV_Visualizer_v1.0.0',
-)
+icon='app_icon.ico' if Path('app_icon.ico').exists() else None,
 ```
 
-## Support
+If `app_icon.ico` is absent the build succeeds with the default PyInstaller
+icon — no error.
 
-For build issues:
-- Check the build log in `build\` folder
-- Review `vxc_adv_system.log` for runtime errors
-- Test the executable on the build machine first
+---
 
-## License & Distribution
+## License Note
 
-Before distributing:
-- Ensure compliance with all dependency licenses
-- PyQt5 is GPL licensed - ensure compliance
-- Consider using PySide6 (LGPL) for commercial use
+PyQt5 is GPL-licensed. For commercial distribution, consider switching to
+PySide6 (LGPL). All other dependencies use permissive licenses (MIT/BSD).
+
+---
+
+## Last Updated
+
+March 4, 2026
