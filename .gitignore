@@ -44,6 +44,11 @@ env/
 data/
 export/
 
+# Raw instrument data and processed output (local only)
+ADV_Data/
+VXC_Positions/
+Data_Output/
+
 # Logs
 *.log
 logs/

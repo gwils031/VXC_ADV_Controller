@@ -13,7 +13,7 @@ from collections import defaultdict
 def test_location_aggregation(session_dir: Path):
     """Test that locations are properly aggregated in session data."""
     
-    averaged_file = session_dir / "averaged_grid_data.csv"
+    averaged_file = session_dir / "master_averaged.csv"
     if not averaged_file.exists():
         print(f"❌ Session file not found: {averaged_file}")
         return False

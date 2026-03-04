@@ -217,6 +217,61 @@ class VXCLogWorker(QObject):
         return self._heartbeat_counter
 
 
+class SliderJogWorker(QObject):
+    """Background worker for slider-commanded X-then-Y jog moves.
+
+    Offloads blocking serial I/O to a QThread so the GUI remains fully
+    responsive during moves that can take tens of seconds.
+    """
+
+    progress = pyqtSignal(str)
+    completed = pyqtSignal()
+    failed = pyqtSignal(str)
+
+    def __init__(self, controller, delta_x: int, delta_y: int, speed: int = 2000):
+        super().__init__()
+        self.controller = controller
+        self.delta_x = delta_x
+        self.delta_y = delta_y
+        self.speed = speed
+
+    def run(self):
+        """Execute X-first, then Y movement in the background thread."""
+        try:
+            if self.delta_x != 0:
+                self.progress.emit(f"Moving X axis ({self.delta_x:+d} steps)...")
+                timeout = abs(self.delta_x) / max(self.speed, 1) + 3.0
+                old_timeout = self.controller.timeout
+                self.controller.timeout = max(timeout, 3.0)
+                success = self.controller.step_motor(
+                    motor=2, steps=self.delta_x, speed=self.speed,
+                    acceleration=2, wait=True,
+                )
+                self.controller.timeout = old_timeout
+                if not success:
+                    self.failed.emit("X axis movement timed out or failed")
+                    return
+
+            if self.delta_y != 0:
+                self.progress.emit(f"Moving Y axis ({self.delta_y:+d} steps)...")
+                timeout = abs(self.delta_y) / max(self.speed, 1) + 3.0
+                old_timeout = self.controller.timeout
+                self.controller.timeout = max(timeout, 3.0)
+                success = self.controller.step_motor(
+                    motor=1, steps=self.delta_y, speed=self.speed,
+                    acceleration=2, wait=True,
+                )
+                self.controller.timeout = old_timeout
+                if not success:
+                    self.failed.emit("Y axis movement timed out or failed")
+                    return
+
+            self.completed.emit()
+
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class FindOriginWorker(QObject):
     """Background worker to move both axes to origin (0,0) position."""
 
@@ -522,6 +577,8 @@ class MainWindow(QMainWindow):
         self.vxc_log_worker: Optional[VXCLogWorker] = None
         self.boundary_thread: Optional[QThread] = None
         self.boundary_worker: Optional[BoundaryFindWorker] = None
+        self.slider_jog_thread: Optional[QThread] = None
+        self.slider_jog_worker: Optional[SliderJogWorker] = None
         self.boundary_limits = self.experiment_config.get("boundaries", {})
         self.boundary_max_seconds = 180.0  # Increased to handle full workspace traversal
         self.boundary_step_size = 4000
@@ -714,10 +771,10 @@ class MainWindow(QMainWindow):
         
         # Plane dimensions (from measurement area)
         # Origin (0,0) is at bottom-LEFT
-        # X axis: from 0 to 163963 (163963 steps wide, positive rightward)
-        # Y axis: from 0 to 39000 (39000 steps tall, positive upward)
-        self.plane_x_max_distance = 163963  # maximum distance from origin
-        self.plane_y_max_distance = 39000
+        # X axis: from 0 to 165654 (~1.0519 m wide, positive rightward)
+        # Y axis: from 0 to 57651 (~0.3661 m tall, positive upward)
+        self.plane_x_max_distance = 165654  # maximum distance from origin
+        self.plane_y_max_distance = 57651
         
         # X position slider (absolute position across flume)
         x_slider_layout = QVBoxLayout()
@@ -889,6 +946,7 @@ class MainWindow(QMainWindow):
             
         # Disconnect
         self.vxc_timer.stop()
+        self._stop_slider_jog()
         self._stop_vxc_polling()
         self._stop_vxc_logging()
         self.jog_timer.stop()
@@ -1083,8 +1141,8 @@ class MainWindow(QMainWindow):
         
         # Update jog sliders to reflect current position
         # Origin (0,0) is bottom-LEFT, positive steps go right and up
-        # X axis: step position ranges from 0 to 163963 (positive rightward)
-        # Y axis: step position ranges from 0 to 39000 (positive upward)
+        # X axis: step position ranges from 0 to 165654 (positive rightward)
+        # Y axis: step position ranges from 0 to 57651 (positive upward)
         x_distance = x_steps  # X is already positive
         y_distance = y_steps  # Y is already positive
         
@@ -1396,113 +1454,113 @@ class MainWindow(QMainWindow):
             self.y_position_label.setText(f"{mm:.1f} mm ({pct:.0f}% up)")
     
     def _jog_to_position(self):
-        """Move to absolute position set by sliders."""
+        """Start a non-blocking slider-commanded jog (X first, then Y).
+
+        All serial I/O is offloaded to a background QThread so the GUI
+        stays responsive during moves that can take tens of seconds.
+        """
         if self.vxc is None:
             QMessageBox.warning(self, "Not Connected", "VXC is not connected.")
             return
-        
-        # Get target absolute positions from sliders
-        target_x_slider = self.x_slider.value()  # 0 to 163963
-        target_y_slider = self.y_slider.value()  # 0 to 39000
-        
-        # Origin (0,0) is bottom-LEFT, positive steps go right and up
-        # X: slider 0=origin (pos 0), slider 163963=far side (pos 163963)
-        # Y: slider 0=bottom (pos 0), slider 39000=top (pos 39000)
-        target_x_position = target_x_slider  # Positive rightward from origin
-        target_y_position = target_y_slider  # Positive upward from origine X moves left from origin
-        target_y_position = target_y_slider   # Positive upward
-        
-        # Get current positions
-        current_x = self.vxc.get_position(motor=2)  # Motor 2 = X axis
-        current_y = self.vxc.get_position(motor=1)  # Motor 1 = Y axis
-        
+
+        if self.slider_jog_thread is not None:
+            return  # Already jogging — ignore second press
+
+        target_x = self.x_slider.value()
+        target_y = self.y_slider.value()
+
+        # Read current position — fast single query, acceptable on GUI thread
+        current_x = self.vxc.get_position(motor=2)
+        current_y = self.vxc.get_position(motor=1)
+
         if current_x is None or current_y is None:
             QMessageBox.critical(self, "Position Error", "Cannot read current VXC position.")
             return
-        
-        # Calculate relative steps needed (delta)
-        delta_x = target_x_position - current_x
-        delta_y = target_y_position - current_y
-        
-        logger.info(f"Slider jog: from ({current_x},{current_y}) to ({target_x_position},{target_y_position})")
-        logger.info(f"Delta: X={delta_x:+d}, Y={delta_y:+d} steps")
-        
-        # Pause position polling to avoid command conflicts during movement
-        polling_was_active = self.vxc_timer.isActive()
-        if polling_was_active:
-            self.vxc_timer.stop()
-            logger.debug("Paused position polling for jog operation")
-        
-        self.jog_to_status.setText("🔄 Moving X axis...")
+
+        delta_x = target_x - current_x
+        delta_y = target_y - current_y
+
+        if delta_x == 0 and delta_y == 0:
+            self.jog_to_status.setText("Already at target position")
+            return
+
+        logger.info(f"Slider jog: ({current_x},{current_y}) -> ({target_x},{target_y}), "
+                    f"delta X={delta_x:+d} Y={delta_y:+d}")
+
+        # Disable GO button and update status for the duration of the move
+        self.jog_go_btn.setEnabled(False)
+        first_msg = (f"Moving X axis ({delta_x:+d} steps)..."
+                     if delta_x != 0 else f"Moving Y axis ({delta_y:+d} steps)...")
+        self.jog_to_status.setText(first_msg)
         self.jog_to_status.setStyleSheet("color: #007bff; font-weight: bold;")
-        QApplication.processEvents()
-        
-        try:
-            # Calculate timeout: distance/speed + 2 seconds buffer for accel/decel
-            speed = 2000
-            
-            # Move X axis first (motor 2) using RELATIVE steps
-            if delta_x != 0:
-                timeout = abs(delta_x) / speed + 2.0
-                old_timeout = self.vxc.timeout
-                self.vxc.timeout = max(timeout, 3.0)  # Minimum 3 seconds
-                
-                logger.info(f"Moving X axis {delta_x:+d} steps (timeout: {self.vxc.timeout:.1f}s)")
-                success = self.vxc.step_motor(motor=2, steps=delta_x, speed=speed, acceleration=2, wait=True)
-                self.vxc.timeout = old_timeout
-                
-                if not success:
-                    raise Exception("X axis movement timed out or failed")
-            else:
-                logger.info("X axis already at target position")
-            
-            self.jog_to_status.setText("🔄 Moving Y axis...")
-            QApplication.processEvents()
-            
-            # Move Y axis second (motor 1) using RELATIVE steps
-            if delta_y != 0:
-                timeout = abs(delta_y) / speed + 2.0
-                old_timeout = self.vxc.timeout
-                self.vxc.timeout = max(timeout, 3.0)
-                
-                logger.info(f"Moving Y axis {delta_y:+d} steps (timeout: {self.vxc.timeout:.1f}s)")
-                success = self.vxc.step_motor(motor=1, steps=delta_y, speed=speed, acceleration=2, wait=True)
-                self.vxc.timeout = old_timeout
-                
-                if not success:
-                    raise Exception("Y axis movement timed out or failed")
-            else:
-                logger.info("Y axis already at target position")
-            
-            # Success
-            self.jog_to_status.setText("✅ Complete!")
-            self.jog_to_status.setStyleSheet("color: #28a745; font-weight: bold;")
-            logger.info(f"Jog complete: now at ({target_x_position}, {target_y_position})")
-            
-            # Reset status after delay
-            QTimer.singleShot(2000, lambda: self.jog_to_status.setText("Ready"))
-            QTimer.singleShot(2000, lambda: self.jog_to_status.setStyleSheet("color: #28a745;"))
-            
-        except Exception as e:
-            self.jog_to_status.setText("❌ Failed")
-            self.jog_to_status.setStyleSheet("color: #dc3545; font-weight: bold;")
-            logger.error(f"Jog failed: {e}")
-            QMessageBox.critical(self, "Jog Failed", f"Movement failed: {e}")
-        
-        finally:
-            # Resume position polling if it was active
-            if polling_was_active:
-                time.sleep(0.2)  # Brief pause before resuming polling
-                self.vxc_timer.start()
-                logger.debug("Resumed position polling after jog")
-            
-            # Reconnect position updates to sliders after jog completes
-            if self.vxc_poll_worker is not None:
-                try:
-                    self.vxc_poll_worker.position_updated.connect(self._apply_vxc_position)
-                    logger.debug("Reconnected position updates after jog")
-                except:
-                    pass  # Already connected
+
+        # Disconnect live position->slider update so it doesn't fight the
+        # moving slider handle while the jog is in progress
+        if self.vxc_poll_worker is not None:
+            try:
+                self.vxc_poll_worker.position_updated.disconnect(self._apply_vxc_position)
+            except Exception:
+                pass
+
+        # Build and start the background worker
+        self.slider_jog_thread = QThread()
+        self.slider_jog_worker = SliderJogWorker(self.vxc, delta_x, delta_y)
+        self.slider_jog_worker.moveToThread(self.slider_jog_thread)
+        self.slider_jog_thread.started.connect(self.slider_jog_worker.run)
+        self.slider_jog_worker.progress.connect(self._on_slider_jog_progress)
+        self.slider_jog_worker.completed.connect(self._on_slider_jog_completed)
+        self.slider_jog_worker.failed.connect(self._on_slider_jog_failed)
+        self.slider_jog_worker.completed.connect(self.slider_jog_thread.quit)
+        self.slider_jog_worker.failed.connect(self.slider_jog_thread.quit)
+        self.slider_jog_thread.finished.connect(self._cleanup_slider_jog_worker)
+        self.slider_jog_thread.start()
+
+    def _on_slider_jog_progress(self, message: str):
+        """Relay background worker status text to the status label."""
+        self.jog_to_status.setText(message)
+
+    def _on_slider_jog_completed(self):
+        """Handle successful jog completion."""
+        self.jog_to_status.setText("Move complete!")
+        self.jog_to_status.setStyleSheet("color: #28a745; font-weight: bold;")
+        logger.info("Slider jog completed successfully")
+        QTimer.singleShot(2000, lambda: self.jog_to_status.setText("Ready"))
+        QTimer.singleShot(2000, lambda: self.jog_to_status.setStyleSheet("color: #28a745;"))
+
+    def _on_slider_jog_failed(self, error: str):
+        """Handle jog failure."""
+        self.jog_to_status.setText("Move failed")
+        self.jog_to_status.setStyleSheet("color: #dc3545; font-weight: bold;")
+        logger.error(f"Slider jog failed: {error}")
+        QMessageBox.critical(self, "Jog Failed", f"Movement failed:\n{error}")
+
+    def _cleanup_slider_jog_worker(self):
+        """Called when the jog thread finishes — re-enables UI and reconnects signals."""
+        self.slider_jog_worker = None
+        self.slider_jog_thread = None
+        self.slider_being_adjusted = False
+
+        # Re-enable GO button if still connected
+        if self.vxc is not None:
+            self.jog_go_btn.setEnabled(True)
+
+        # Reconnect position updates -> sliders.
+        # UniqueConnection silently ignores duplicate connects.
+        if self.vxc_poll_worker is not None:
+            try:
+                self.vxc_poll_worker.position_updated.connect(
+                    self._apply_vxc_position, Qt.UniqueConnection
+                )
+            except Exception:
+                pass
+
+    def _stop_slider_jog(self):
+        """Abort any in-progress slider jog and clean up the thread."""
+        if self.slider_jog_thread is not None:
+            self.slider_jog_thread.quit()
+            self.slider_jog_thread.wait(2000)
+        self.slider_jog_worker = None
+        self.slider_jog_thread = None
     
     def _vxc_zero(self):
         """Zero VXC position."""
@@ -1557,6 +1615,7 @@ class MainWindow(QMainWindow):
         # Stop timers
         self.vxc_timer.stop()
         self.jog_timer.stop()
+        self._stop_slider_jog()
         self._stop_vxc_polling()
         self._stop_vxc_logging()
         

@@ -32,6 +32,7 @@ class CrossSectionWorker(QObject):
     position_reached = pyqtSignal(float, float, int)  # x_m, y_m, index
     completed = pyqtSignal()
     error = pyqtSignal(str)
+    position_error = pyqtSignal(str)  # Recoverable error — user can skip or stop
     status_update = pyqtSignal(str)
     eta_update = pyqtSignal(float, float, int, int)  # elapsed_sec, remaining_sec, current_pos, total_pos
     
@@ -45,6 +46,8 @@ class CrossSectionWorker(QObject):
         self.speed = speed  # steps per second
         self._running = True
         self._paused = False
+        self._waiting_for_decision = False  # True while blocked waiting for skip/stop
+        self._skip_current = False          # Set by skip_position() to continue the loop
         self.start_time = None
     
     def _estimate_movement_time(self, current_pos: Dict, target_pos: Dict) -> float:
@@ -157,8 +160,17 @@ class CrossSectionWorker(QObject):
                     # Log controller state for diagnostics
                     status = self.controller.verify_status()
                     logger.error(f"Final controller status: {status}")
-                    self.error.emit(error_msg)
-                    break
+                    self._waiting_for_decision = True
+                    self._skip_current = False
+                    self.position_error.emit(error_msg)
+                    while self._waiting_for_decision and self._running:
+                        time.sleep(0.1)
+                    if not self._running:
+                        self.status_update.emit("Stopped by user")
+                        break
+                    logger.info(f"Position {i+1} skipped by user after move failure — continuing scan")
+                    self.progress.emit(i + 1, total)
+                    continue
                 
                 # Verify position reached with tolerance checking
                 actual_x = self.controller.get_position(motor=2)
@@ -170,16 +182,35 @@ class CrossSectionWorker(QObject):
                     self.error.emit(error_msg)
                     break
                 
-                # Check position accuracy (tolerance: ±10 steps)
+                # Check position accuracy with two-tier tolerance:
+                #   Warning  (±100 steps, ~0.6 mm) — log and continue
+                #   Hard error (±500 steps, ~3 mm) — stop scan
+                TOLERANCE_WARN  = 100   # steps (~0.6 mm at 157 480 steps/m)
+                TOLERANCE_ERROR = 500   # steps (~3.2 mm)
                 pos_error_x = abs(actual_x - x_steps)
                 pos_error_y = abs(actual_y - y_steps)
                 logger.info(f"Position verification: Target=({x_steps}, {y_steps}), Actual=({actual_x}, {actual_y}), Error=({pos_error_x}, {pos_error_y})")
                 
-                if pos_error_x > 10 or pos_error_y > 10:
-                    error_msg = f"Position {i+1} accuracy error: X_err={pos_error_x} steps, Y_err={pos_error_y} steps (tolerance: ±10)"
+                if pos_error_x > TOLERANCE_ERROR or pos_error_y > TOLERANCE_ERROR:
+                    error_msg = (f"Position {i+1} accuracy error: X_err={pos_error_x} steps, "
+                                 f"Y_err={pos_error_y} steps (hard limit: ±{TOLERANCE_ERROR})")
                     logger.error(error_msg)
-                    self.error.emit(error_msg)
-                    break
+                    self._waiting_for_decision = True
+                    self._skip_current = False
+                    self.position_error.emit(error_msg)
+                    while self._waiting_for_decision and self._running:
+                        time.sleep(0.1)
+                    if not self._running:
+                        self.status_update.emit("Stopped by user")
+                        break
+                    logger.info(f"Position {i+1} skipped by user — continuing scan")
+                    self.progress.emit(i + 1, total)
+                    continue
+                elif pos_error_x > TOLERANCE_WARN or pos_error_y > TOLERANCE_WARN:
+                    warn_msg = (f"Position {i+1} accuracy warning: X_err={pos_error_x} steps, "
+                                f"Y_err={pos_error_y} steps (warning limit: ±{TOLERANCE_WARN}) — continuing")
+                    logger.warning(warn_msg)
+                    self.status_update.emit(warn_msg)
                 
                 # Allow settling time for water disturbance
                 if self.settling_time_sec > 0:
@@ -226,6 +257,7 @@ class CrossSectionWorker(QObject):
         """Stop the automation."""
         self._running = False
         self._paused = False
+        self._waiting_for_decision = False  # Unblock any wait loop
     
     def pause(self):
         """Pause the automation."""
@@ -235,6 +267,11 @@ class CrossSectionWorker(QObject):
         """Resume the automation."""
         self._paused = False
 
+    def skip_position(self):
+        """Skip the current position and continue the scan."""
+        self._skip_current = True
+        self._waiting_for_decision = False
+
 
 class CrossSectionTab(QWidget):
     """Tab for automated cross-section measurement control."""
@@ -242,8 +279,8 @@ class CrossSectionTab(QWidget):
     # Hardware constants
     STEPS_PER_INCH = 4000.0
     METERS_PER_FOOT = 0.3048
-    X_MAX_STEPS = 163963  # Motor 2
-    Y_MAX_STEPS = 39000   # Motor 1
+    X_MAX_STEPS = 165654  # Motor 2 (~1.0519 m)
+    Y_MAX_STEPS = 57651   # Motor 1 (~0.3661 m)
     
     def __init__(self, vxc_controller, vxc_logger=None):
         super().__init__()
@@ -489,6 +526,13 @@ class CrossSectionTab(QWidget):
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.stop_btn)
+        
+        self.skip_btn = QPushButton("Skip Position")
+        self.skip_btn.setEnabled(False)
+        self.skip_btn.clicked.connect(self._skip_position)
+        self.skip_btn.setStyleSheet("background-color: #fd7e14; color: white; font-weight: bold; padding: 8px;")
+        btn_layout.addWidget(self.skip_btn)
+        
         btn_layout.addStretch()
         
         layout.addLayout(btn_layout)
@@ -799,6 +843,7 @@ class CrossSectionTab(QWidget):
         self.worker.status_update.connect(self._on_status_update)
         self.worker.eta_update.connect(self._on_eta_update)
         self.worker.error.connect(self._on_error)
+        self.worker.position_error.connect(self._on_position_error)
         self.worker.completed.connect(self._on_completed)
         self.worker.completed.connect(self.worker_thread.quit)
         self.worker_thread.finished.connect(self._cleanup)
@@ -906,6 +951,22 @@ class CrossSectionTab(QWidget):
         QMessageBox.critical(self, "Automation Error", error_msg)
         self.status_label.setText(f"Error: {error_msg}")
         self._cleanup()
+
+    def _on_position_error(self, error_msg: str):
+        """Handle a recoverable position error — enables Skip button to continue scan."""
+        logger.warning(f"Position error (awaiting user action): {error_msg}")
+        self.status_label.setText(f"\u26a0 {error_msg} — click Skip Position or Stop")
+        self.skip_btn.setEnabled(True)
+        self.pause_btn.setEnabled(False)  # Disable pause while waiting for decision
+
+    def _skip_position(self):
+        """Skip the current erroneous position and continue the scan."""
+        if self.worker:
+            self.worker.skip_position()
+            self.skip_btn.setEnabled(False)
+            self.pause_btn.setEnabled(True)
+            self.status_label.setText("Position skipped — continuing scan...")
+            logger.info("User skipped position")
     
     def _on_completed(self):
         """Handle automation completion."""
@@ -938,6 +999,7 @@ class CrossSectionTab(QWidget):
         self.pause_btn.setText("Pause")
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
         self._set_ui_enabled(True)
         
         if self.calculated_positions:
@@ -968,9 +1030,11 @@ class CrossSectionTab(QWidget):
                             writer.writerow(['point_number', 'x_m', 'y_m', 'x_steps', 'y_steps', 'estimated_dwell_sec'])
                             
                             dwell_time = self.dwell_time_spin.value()
-                            for i, (x_steps, y_steps) in enumerate(self.calculated_positions, start=1):
-                                x_m = self._steps_to_meters(x_steps)
-                                y_m = self._steps_to_meters(y_steps)
+                            for i, pos in enumerate(self.calculated_positions, start=1):
+                                x_m = pos['x_m']
+                                y_m = pos['y_m']
+                                x_steps = pos['x_steps']
+                                y_steps = pos['y_steps']
                                 writer.writerow([i, f"{x_m:.4f}", f"{y_m:.4f}", x_steps, y_steps, dwell_time])
                         
                         # Update session config with scan parameters

@@ -34,153 +34,121 @@ class MergeWorkerThread(QThread):
         self.session_manager = session_manager
 
     def run(self):
-        """Execute merge operation in background thread."""
+        """Execute merge operation in background thread.
+        
+        All output is written exclusively through the active session manager.
+        If no session is active the file is skipped to prevent stray output files.
+        """
         filename = self.adv_file.name
         try:
+            # Guard: require an active session — no standalone file writes
+            if not (self.session_manager and self.session_manager.is_active()):
+                logger.warning(f"[WORKER] No active session — skipping {filename}")
+                self.failed.emit(f"{filename}: No active session (start a session first)")
+                return
+
             logger.info(f"[WORKER] Starting merge for {filename}")
             merger = ADVVXCMerger(tolerance_sec=self.tolerance_sec)
-            
+
             logger.debug(f"[WORKER] Parsing ADV file: {self.adv_file}")
             merger.parse_adv_csv(str(self.adv_file))
-            
+
             logger.debug(f"[WORKER] Parsing VXC file: {self.vxc_file}")
             merger.parse_vxc_csv(str(self.vxc_file))
-            
+
             logger.debug(f"[WORKER] Merging data for {filename}")
             matched, _unmatched, stats = merger.merge()
 
-            # Use session manager if active, otherwise write to output_dir
-            if self.session_manager and self.session_manager.is_active():
-                logger.debug(f"[WORKER] Using session manager for {filename}")
-                
-                # Get merged and averaged data from merger
-                merged_data = merger.merged_data
-                
-                # Calculate averaged data for session
-                avg_data_dict = {}
-                if merged_data:
-                    # Get grid position from first valid sample with VXC data
-                    for sample in merged_data:
-                        if sample.get('vxc_quality') != 'MISSING':
-                            avg_data_dict['x_m'] = sample.get('vxc_x_m')
-                            avg_data_dict['y_m'] = sample.get('vxc_y_m')
-                            avg_data_dict['timestamp_utc'] = sample.get('timestamp_utc')
-                            avg_data_dict['quality_flag'] = sample.get('vxc_quality')  # Use quality_flag for averaged schema
-                            # Note: time_delta_ms not in averaged schema, only in raw
-                            break
-                    
-                    # Calculate averages for velocity and quality metrics
-                    valid_samples = [s for s in merged_data if s.get('vxc_quality') != 'MISSING']
-                    if valid_samples:
-                        avg_data_dict['sample_count'] = len(valid_samples)
-                        # Note: 'status' field removed - not in session fieldnames
-                        
-                        # Average velocity components
-                        for key in ['Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
-                                   'Corrected Velocity.X (m/s)', 'Corrected Velocity.Y (m/s)', 'Corrected Velocity.Z (m/s)']:
-                            values = [float(s.get(key, 0)) for s in valid_samples if s.get(key) is not None]
-                            if values:
-                                avg_data_dict[key] = sum(values) / len(values)
-                        
-                        # Average correlation and SNR
-                        corr_values = []
-                        snr_values = []
-                        for s in valid_samples:
-                            for i in range(1, 4):
-                                corr_val = s.get(f'Correlation Score.Beam{i} (%)')
-                                snr_val = s.get(f'SNR.Beam{i} (dB)')
-                                if corr_val is not None:
-                                    corr_values.append(float(corr_val))
-                                if snr_val is not None:
-                                    snr_values.append(float(snr_val))
-                        
-                        if corr_values:
-                            avg_data_dict['Correlation.Avg (%)'] = sum(corr_values) / len(corr_values)
-                        if snr_values:
-                            avg_data_dict['SNR.Avg (dB)'] = sum(snr_values) / len(snr_values)
-                        
-                        # Average environmental data - map field names to match session schema
-                        env_field_map = {
-                            'Temperature (°C)': 'Temperature (C)',  # Remove degree symbol
-                            'Pressure (dbar)': 'Pressure (dbar)',
-                            'Voltage (V)': 'Voltage (V)'
-                        }
-                        for adv_key, session_key in env_field_map.items():
-                            values = [float(s.get(adv_key, 0)) for s in valid_samples if s.get(adv_key) is not None]
-                            if values:
-                                avg_data_dict[session_key] = sum(values) / len(values)
-                
-                # Append to session
-                try:
-                    seq = self.session_manager.append_measurement(merged_data, avg_data_dict)
-                    stats['session_measurement_seq'] = seq
-                    logger.info(f"[WORKER] Appended to session: measurement {seq}")
-                except Exception as e:
-                    logger.error(f"[WORKER] Failed to append to session: {e}")
-                    # Fall through to write individual files
-            else:
-                # No active session - write individual files (legacy behavior)
-                logger.debug(f"[WORKER] Writing merged output for {filename}")
-                output_file = self.output_dir / f"{self.adv_file.stem}_merged.csv"
-                merger.write_merged_csv(str(output_file))
+            logger.debug(f"[WORKER] Building session data for {filename}")
+            all_merged = merger.merged_data
 
-                logger.debug(f"[WORKER] Writing averaged output for {filename}")
-                avg_output_file = self.output_dir / f"{self.adv_file.stem}_avg_xy.csv"
-                try:
-                    avg_path, avg_stats = merger.write_averaged_plane_csv(str(avg_output_file))
-                    stats.update(avg_stats)
-                    stats["avg_output_file"] = avg_path
-                except Exception as e:
-                    logger.warning(f"[WORKER] Averaged output failed for {filename}: {e}")
+            # Matched-only samples (VXC position was found)
+            matched_samples = [s for s in all_merged if s.get('vxc_quality') != 'MISSING']
+
+            # Build averaged dict from matched samples only
+            avg_data_dict = {}
+            if matched_samples:
+                # Position and timestamp from first matched sample
+                first = matched_samples[0]
+                avg_data_dict['x_m'] = first.get('vxc_x_m')
+                avg_data_dict['y_m'] = first.get('vxc_y_m')
+                avg_data_dict['timestamp_utc'] = first.get('UTC time') or first.get('timestamp_utc')
+                avg_data_dict['sample_count'] = len(matched_samples)
+
+                # Helper: safe float parse (handles empty strings / non-numeric from ADV CSV)
+                def _safe_floats(samples, key):
+                    result = []
+                    for s in samples:
+                        v = merger._parse_float(s.get(key))
+                        if v is not None:
+                            result.append(v)
+                    return result
+
+                # Average velocity components
+                for key in ['Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
+                            'Corrected Velocity.X (m/s)', 'Corrected Velocity.Y (m/s)', 'Corrected Velocity.Z (m/s)']:
+                    values = _safe_floats(matched_samples, key)
+                    if values:
+                        avg_data_dict[key] = sum(values) / len(values)
+
+                # Average correlation and SNR across all three beams
+                corr_values, snr_values = [], []
+                for s in matched_samples:
+                    for i in range(1, 4):
+                        c = merger._parse_float(s.get(f'Correlation Score.Beam{i} (%)'))
+                        n = merger._parse_float(s.get(f'SNR.Beam{i} (dB)'))
+                        if c is not None:
+                            corr_values.append(c)
+                        if n is not None:
+                            snr_values.append(n)
+                if corr_values:
+                    avg_data_dict['Correlation.Avg (%)'] = sum(corr_values) / len(corr_values)
+                if snr_values:
+                    avg_data_dict['SNR.Avg (dB)'] = sum(snr_values) / len(snr_values)
+
+                # Average environmental columns (map ADV header → session schema key)
+                env_field_map = {
+                    'Temperature (°C)': 'Temperature (C)',
+                    'Raw Pressure (dbar)': 'Raw Pressure (dbar)',
+                    'Voltage (V)': 'Voltage (V)',
+                }
+                for adv_key, session_key in env_field_map.items():
+                    values = _safe_floats(matched_samples, adv_key)
+                    if values:
+                        avg_data_dict[session_key] = sum(values) / len(values)
+
+                # Gauge pressure = raw pressure − local atmospheric pressure
+                if 'Raw Pressure (dbar)' in avg_data_dict:
+                    atm = merger._load_atmospheric_pressure()
+                    avg_data_dict['Gauge Pressure (dbar)'] = float(avg_data_dict['Raw Pressure (dbar)']) - atm
+
+            # Append matched samples + averaged summary to the session master files
+            try:
+                seq = self.session_manager.append_measurement(matched_samples, avg_data_dict)
+                stats['session_measurement_seq'] = seq
+                logger.info(f"[WORKER] Appended measurement {seq} to session ({len(matched_samples)} matched samples)")
+            except Exception as e:
+                logger.error(f"[WORKER] Failed to append to session: {e}")
+                self.failed.emit(f"{filename}: session write error — {e}")
+                return
+
+            # Archive raw ADV files into session/raw_exports/
+            try:
+                import shutil
+                raw_exports_dir = self.session_manager.session_dir / "raw_exports"
+                raw_exports_dir.mkdir(exist_ok=True)
+                shutil.copy2(self.adv_file, raw_exports_dir / self.adv_file.name)
+                config_file = self.adv_file.with_suffix('.labadv_config')
+                if config_file.exists():
+                    shutil.copy2(config_file, raw_exports_dir / config_file.name)
+                logger.info(f"[WORKER] Archived raw files to {raw_exports_dir}")
+            except Exception as archive_err:
+                logger.warning(f"[WORKER] Failed to archive raw files: {archive_err}")
 
             stats["matched"] = matched
-            
-            # Validate merged data - delete output files if no valid matches
-            # (Only applies when writing individual files, not for sessions)
-            if not (self.session_manager and self.session_manager.is_active()):
-                avg_valid_points = stats.get("avg_points_valid", 0)
-                
-                if matched == 0 or avg_valid_points == 0:
-                    reason = "no merged data" if matched == 0 else "no valid grid points with position data"
-                    logger.warning(f"[WORKER] Invalid output for {filename}: {reason} - deleting files")
-                    try:
-                        if output_file.exists():
-                            output_file.unlink()
-                            logger.info(f"[WORKER] Deleted {output_file.name} ({reason})")
-                        if avg_output_file.exists():
-                            avg_output_file.unlink()
-                            logger.info(f"[WORKER] Deleted {avg_output_file.name} ({reason})")
-                    except Exception as del_err:
-                        logger.error(f"[WORKER] Failed to delete invalid output files: {del_err}")
-                    
-                    # Emit failure signal instead of success
-                    error_msg = f"{filename}: No valid VXC+ADV data (matched={matched}, valid_points={avg_valid_points})"
-                    self.failed.emit(error_msg)
-                    return
-            
-            # Archive raw ADV files to session if active
-            if self.session_manager and self.session_manager.is_active():
-                try:
-                    import shutil
-                    session_dir = self.session_manager.session_dir
-                    raw_exports_dir = session_dir / "raw_exports"
-                    raw_exports_dir.mkdir(exist_ok=True)
-                    
-                    # Copy ADV CSV file
-                    shutil.copy2(self.adv_file, raw_exports_dir / self.adv_file.name)
-                    
-                    # Copy config file if exists
-                    config_file = self.adv_file.with_suffix('.labadv_config')
-                    if config_file.exists():
-                        shutil.copy2(config_file, raw_exports_dir / config_file.name)
-                    
-                    logger.info(f"[WORKER] Archived raw files to {raw_exports_dir}")
-                except Exception as archive_err:
-                    logger.warning(f"[WORKER] Failed to archive raw files: {archive_err}")
-            
             logger.info(f"[WORKER] Merge completed for {filename}, emitting signal")
             self.completed.emit(filename, stats)
-            logger.debug(f"[WORKER] Signal emitted for {filename}")
+
         except Exception as e:
             logger.error(f"[WORKER] Merge failed for {filename}: {e}", exc_info=True)
             self.failed.emit(f"{filename}: {str(e)}")
@@ -251,13 +219,15 @@ class FileMonitor(QObject):
         self.file_watcher = QFileSystemWatcher()
         self.file_watcher.directoryChanged.connect(self._on_directory_changed)
         
-        # Timer 1: File completion checker (500ms)
+        # Timer 1: Combined file-completion + queue processor (500ms)
+        # Handles both pending-file stability checks and merge-queue dispatch
+        # in one timer to halve GUI-thread wakeups vs two separate timers.
         self.completion_timer = QTimer()
         self.completion_timer.timeout.connect(self._check_pending_files)
+        self.completion_timer.timeout.connect(self._process_merge_queue)
         
-        # Timer 2: Queue processor (1000ms)
-        self.queue_timer = QTimer()
-        self.queue_timer.timeout.connect(self._process_merge_queue)
+        # Timer 2: (alias kept for stop_monitoring compatibility)
+        self.queue_timer = self.completion_timer
         
         # Timer 3: Polling fallback (user-configurable, default 5000ms)
         self.poll_timer = QTimer()
@@ -295,17 +265,23 @@ class FileMonitor(QObject):
         # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Clear cached processed files on startup to allow reprocessing of failed merges
+        # Pre-populate processed_files with all existing CSVs so they are NOT treated as new.
+        # Only files that appear AFTER monitoring starts will be processed.
         self.processed_files.clear()
-        logger.info("Cleared processed files cache for fresh scan")
+        existing_count = 0
+        for existing_file in self.watch_dir.glob("*.csv"):
+            if self.is_valid_adv_filename(existing_file.name):
+                self.processed_files.add(existing_file)
+                existing_count += 1
+        logger.info(f"Pre-marked {existing_count} existing ADV CSV files as already processed — only new files will be merged")
         
         # Add watch path
         if str(self.watch_dir) not in self.file_watcher.directories():
             self.file_watcher.addPath(str(self.watch_dir))
         
         # Start all timers
-        self.completion_timer.start(500)  # Check pending files every 500ms
-        self.queue_timer.start(1000)  # Process queue every 1s
+        self.completion_timer.start(500)  # Check pending + process queue every 500ms
+        # queue_timer is an alias for completion_timer — no separate start needed
         self.poll_timer.start(int(self.poll_interval * 1000))  # Polling fallback
         self.retry_timer.start(10000)  # Retry every 10s
         self.cleanup_timer.start(300000)  # Cleanup every 5 minutes
@@ -314,16 +290,12 @@ class FileMonitor(QObject):
         logger.info(f"File monitoring started: {self.watch_dir}")
         self.status_update.emit(f"Monitoring active: {self.watch_dir}")
         
-        # Process any existing backlog
-        self._process_backlog()
-        
         return True
     
     def stop_monitoring(self):
         """Stop file monitoring."""
-        # Stop all timers
+        # Stop all timers (queue_timer is same object as completion_timer)
         self.completion_timer.stop()
-        self.queue_timer.stop()
         self.poll_timer.stop()
         self.retry_timer.stop()
         self.cleanup_timer.stop()
@@ -361,49 +333,13 @@ class FileMonitor(QObject):
     def is_valid_adv_filename(filename: str) -> bool:
         """Validate ADV filename format: YYYYMMDD-HHMMSS.csv
         
-        Args:
-            filename: Filename to validate
-            
-        Returns:
-            True if filename matches ADV export format
+        The compiled regex already enforces the digit counts for date and time
+        components, so a simple match is sufficient — no need to re-parse each
+        component manually.
         """
         if not filename or not isinstance(filename, str):
             return False
-        
-        match = ADV_FILENAME_PATTERN.match(filename)
-        if not match:
-            return False
-        
-        # Validate date/time components
-        date_str, time_str = match.groups()
-        try:
-            # Check if valid date
-            year = int(date_str[0:4])
-            month = int(date_str[4:6])
-            day = int(date_str[6:8])
-            
-            # Check if valid time
-            hour = int(time_str[0:2])
-            minute = int(time_str[2:4])
-            second = int(time_str[4:6])
-            
-            # Basic range validation
-            if not (1900 <= year <= 2100):
-                return False
-            if not (1 <= month <= 12):
-                return False
-            if not (1 <= day <= 31):
-                return False
-            if not (0 <= hour <= 23):
-                return False
-            if not (0 <= minute <= 59):
-                return False
-            if not (0 <= second <= 59):
-                return False
-            
-            return True
-        except ValueError:
-            return False
+        return ADV_FILENAME_PATTERN.match(filename) is not None
     
     def _scan_for_new_files(self):
         """Scan watch directory for new ADV CSV files.
@@ -669,26 +605,20 @@ class FileMonitor(QObject):
             logger.info("No backlog files to process")
     
     def _cleanup_old_entries(self):
-        """Remove old entries from tracking sets to prevent memory growth."""
-        # Clean up processed files that no longer exist or have been successfully merged
-        to_remove = []
-        for filepath in self.processed_files:
-            if not filepath.exists():
-                # File was deleted
-                to_remove.append(filepath)
-            else:
-                # Check if successfully merged
-                merged_file = self.output_dir / f"{filepath.stem}_merged.csv"
-                if merged_file.exists():
-                    # Successfully merged - can remove from tracking
-                    to_remove.append(filepath)
-        
+        """Remove entries for deleted files from tracking sets to prevent memory growth.
+
+        In session mode no _merged.csv sidecar files are written, so the only
+        reliable cleanup signal is the source file being deleted from the ADV
+        watch directory.
+        """
+        to_remove = [fp for fp in self.processed_files if not fp.exists()]
+
         for filepath in to_remove:
             self.processed_files.discard(filepath)
             self.file_sizes.pop(filepath, None)
-        
+
         if to_remove:
-            logger.debug(f"Cleaned up {len(to_remove)} processed file entries")
+            logger.debug(f"Cleaned up {len(to_remove)} deleted file entries from tracking")
     
     def _parse_timestamp_from_filename(self, filename: str) -> Optional[datetime]:
         """Extract timestamp from ADV filename (YYYYMMDD-HHMMSS.csv).

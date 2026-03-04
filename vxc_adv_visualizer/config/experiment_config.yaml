@@ -5,6 +5,13 @@ grid:
   y_spacing_feet: 0.05
 max_sampling_duration_sec: 20.0
 
+# Environmental calibration
+environment:
+  # Atmospheric pressure at measurement site in dbar
+  # Provo, Utah (elevation ~4551 ft / 1387 m): ~8.5 dbar
+  # Sea level: ~10.1325 dbar
+  atmospheric_pressure_dbar: 8.5
+
 # Cross-section automation defaults
 automation:
   default_dwell_time_sec: 60.0

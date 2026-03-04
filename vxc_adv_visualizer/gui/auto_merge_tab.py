@@ -397,13 +397,15 @@ class AutoMergeTab(QWidget):
         self.settings.setValue("auto_merge/output_dir", output_dir)
         tolerance = self.tolerance_spin.value()
         
-        # Initialize session manager if needed, but DON'T auto-create session
+        # Initialize session manager if needed
         if self.session_manager is None:
             self.session_manager = SessionManager(output_dir)
         
-        # Check session status and update UI accordingly
-        if self.session_manager.is_active():
-            # Session already active - update UI to reflect this
+        # Auto-start a session if none is active
+        if not self.session_manager.is_active():
+            self._auto_start_session()
+        else:
+            # Session already active — update UI to reflect this
             session_id = self.session_manager.active_session
             self.session_status_label.setText(f"🟢 COLLECTING DATA - {session_id}")
             self.session_status_label.setStyleSheet("color: green; font-weight: bold;")
@@ -412,17 +414,10 @@ class AutoMergeTab(QWidget):
             self.session_name_edit.setEnabled(False)
             self.operator_edit.setEnabled(False)
             self.save_notes_btn.setEnabled(True)
-            self._log_activity(
-                f"ℹ️ Continuing active session: {session_id}",
-                "info"
-            )
-        else:
-            # No active session
-            self._log_activity(
-                "⚠️ Monitoring started without active session. "
-                "Files will be processed individually. Start a session to group measurements.",
-                "warning"
-            )
+            self._log_activity(f"ℹ️ Continuing active session: {session_id}", "info")
+        
+        # One-time cleanup of legacy standalone output files in the output root
+        self._cleanup_legacy_files(output_dir)
         
         # Ensure VXC log directory exists
         Path(vxc_dir).mkdir(parents=True, exist_ok=True)
@@ -532,18 +527,11 @@ class AutoMergeTab(QWidget):
         avg_file_to_display = None
         
         if self.session_manager and self.session_manager.is_active():
-            # Session mode - use cumulative averaged file
+            # Always use the session master averaged file
             avg_file_to_display = str(self.session_manager.averaged_file)
+            seq = self.session_manager.measurement_seq
             self._log_activity(
-                f"📊 Session measurement {self.session_manager.measurement_seq} appended",
-                "info",
-            )
-        elif avg_output:
-            # Non-session mode - use individual averaged file
-            avg_file_to_display = avg_output
-            avg_name = Path(avg_output).name
-            self._log_activity(
-                f"📊 Averaged: {avg_name} ({avg_points_valid}/{avg_points_total} valid points)",
+                f"📊 Measurement {seq} appended to session master files",
                 "info",
             )
         
@@ -589,7 +577,16 @@ class AutoMergeTab(QWidget):
         # Add to log
         html = f'<span style="color: {color};"><b>[{timestamp}]</b> {message}</span>'
         self.activity_log.append(html)
-        
+
+        # Cap log at 500 lines to prevent memory growth during long sessions
+        _MAX_LOG_LINES = 500
+        doc = self.activity_log.document()
+        if doc.blockCount() > _MAX_LOG_LINES:
+            trim_cursor = QTextCursor(doc)
+            trim_cursor.movePosition(QTextCursor.Start)
+            trim_cursor.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+            trim_cursor.removeSelectedText()
+
         # Auto-scroll to bottom
         cursor = self.activity_log.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -614,6 +611,68 @@ class AutoMergeTab(QWidget):
     def _generate_default_session_name(self) -> str:
         """Generate default session name with timestamp."""
         return datetime.now().strftime("Session_%Y%m%d_%H%M%S")
+    
+    def _auto_start_session(self):
+        """Prompt the user for a session name and start the session automatically.
+        
+        Called at monitoring start when no session is active. The user can accept
+        the default date-based name with one click, or type a custom name.
+        If the dialog is cancelled, the date-based default is used silently.
+        """
+        from PyQt5.QtWidgets import QInputDialog
+        default_name = datetime.now().strftime("Session_%Y%m%d")
+        name, ok = QInputDialog.getText(
+            self,
+            "Start Data Collection Session",
+            "Name this session\n"
+            "(e.g. Run01, CrossSection_Y05, BaselineTest):",
+            text=default_name,
+        )
+        if not ok or not name.strip():
+            name = default_name  # Silent fallback to date-based name
+        name = name.strip()
+
+        session_config = SessionConfig(
+            session_name=name,
+            operator=self.operator_edit.text().strip() or "Unknown",
+            notes=self.notes_edit.text().strip(),
+            scan_type="Manual",
+        )
+        try:
+            session_id = self.session_manager.start_session(session_config)
+            self.current_session_dir = self.session_manager.session_dir
+            self.session_name_edit.setText(name)
+
+            self.session_status_label.setText(f"🟢 COLLECTING DATA - {session_id}")
+            self.session_status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.new_session_btn.setEnabled(False)
+            self.end_session_btn.setEnabled(True)
+            self.session_name_edit.setEnabled(False)
+            self.operator_edit.setEnabled(False)
+            self.save_notes_btn.setEnabled(True)
+
+            self._log_activity(f"✓ Session auto-started: {session_id}", "success")
+        except Exception as e:
+            self._log_activity(f"✗ Failed to auto-start session: {e}", "error")
+
+    def _cleanup_legacy_files(self, output_dir: str):
+        """Delete standalone _merged.csv and _avg_xy.csv files from the output root.
+        
+        These are leftover from before session-based collection was enforced.
+        Called once at monitoring start.
+        """
+        output_path = Path(output_dir)
+        deleted = 0
+        for pattern in ("*_merged.csv", "*_avg_xy.csv"):
+            for f in output_path.glob(pattern):
+                try:
+                    f.unlink()
+                    deleted += 1
+                except Exception as e:
+                    logger.warning(f"Could not delete legacy file {f.name}: {e}")
+        if deleted:
+            self._log_activity(f"🧹 Cleaned up {deleted} legacy standalone output files", "info")
+
     
     def _save_notes(self):
         """Save notes and operator to active session metadata."""

@@ -27,14 +27,15 @@ class LiveDataTab(QWidget):
 
     STEPS_PER_INCH = 4000.0
     METERS_PER_FOOT = 0.3048
-    PLANE_X_STEPS = (0, 163963)  # Positive X axis: 0 to ~1.04m
-    PLANE_Y_STEPS = (0, 39000)   # Positive Y axis: 0 to ~0.25m
+    PLANE_X_STEPS = (0, 165654)  # Positive X axis: 0 to ~1.0519m
+    PLANE_Y_STEPS = (0, 57651)   # Positive Y axis: 0 to ~0.3661m
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.last_avg_file: Optional[str] = None
         self.last_stats: Optional[dict] = None
         self.colorbar = None
+        self._cached_rows: List[dict] = []  # In-memory cache — avoids re-reading CSV on every position update
         self.current_position_m: Optional[Tuple[float, float]] = None
         self._setup_ui()
 
@@ -265,6 +266,26 @@ class LiveDataTab(QWidget):
         """)
         stats_layout.addWidget(self.snr_label)
 
+        # Pressure section
+        pressure_label = QLabel("Pressure")
+        pressure_label.setFont(vel_font)
+        pressure_label.setStyleSheet("color: #212529; padding-top: 8px;")
+        stats_layout.addWidget(pressure_label)
+
+        self.pressure_label = QLabel("Raw:   -- dbar\nGauge: -- dbar")
+        self.pressure_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        stats_layout.addWidget(self.pressure_label)
+
         # Status indicator
         self.status_label = QLabel("● Waiting for data")
         self.status_label.setStyleSheet("color: #6c757d; font-size: 9pt; padding-top: 4px;")
@@ -300,6 +321,7 @@ class LiveDataTab(QWidget):
             self._draw_placeholder("No valid data to display")
             return
 
+        self._cached_rows = rows  # Update in-memory cache
         self._plot_vectors(rows)
         
         # Update stats panel with the MOST RECENT data point (last row)
@@ -381,7 +403,10 @@ class LiveDataTab(QWidget):
         ]
         
         quality_keys = ['Correlation.Avg (%)', 'SNR.Avg (dB)']
-        env_keys = ['Temperature (C)', 'Pressure (dbar)', 'Voltage (V)']
+        env_keys = [
+            'Temperature (°C)', 'Raw Pressure (dbar)', 'Gauge Pressure (dbar)',
+            'Corrected Pressure (dbar)', 'Depth (m)', 'Voltage (V)'
+        ]
         
         aggregated = {
             'x_m': f"{x_loc:.6f}",
@@ -573,16 +598,16 @@ class LiveDataTab(QWidget):
         return (x_min_m, x_max_m, y_min_m, y_max_m)
 
     def update_current_position(self, x_m: float, y_m: float):
-        """Update current VXC position and refresh plot marker.
+        """Update current VXC position marker on the plot.
         
-        Note: Stats panel now shows LAST DATA POINT, not current VXC position.
+        Uses the in-memory row cache — does NOT re-read the CSV file from disk.
+        The cache is refreshed whenever new merged data arrives.
         """
         self.current_position_m = (x_m, y_m)
         
-        # Just redraw plot to show current VXC position marker
-        # Stats and position display now show last collected data point
-        if self.last_avg_file:
-            self._reload_last_file()
+        # Redraw with cached data (no disk I/O)
+        if self._cached_rows:
+            self._plot_vectors(self._cached_rows)
 
     def _update_stats_panel(self, point_data: Optional[dict]):
         """Update the statistics panel with current position data."""
@@ -593,6 +618,7 @@ class LiveDataTab(QWidget):
             self.sample_label.setText("Samples: --")
             self.correlation_label.setText("Beam1: N/A\nBeam2: N/A\nBeam3: N/A\nAvg: -- %")
             self.snr_label.setText("Beam1: N/A\nBeam2: N/A\nBeam3: N/A\nAvg: -- dB")
+            self.pressure_label.setText("Raw:   -- dbar\nGauge: -- dbar")
             self.status_label.setText("● No data at position")
             self.status_label.setStyleSheet("color: #dc3545; font-size: 9pt; padding-top: 4px;")
             return
@@ -672,6 +698,14 @@ class LiveDataTab(QWidget):
             f"Beam1: N/A\nBeam2: N/A\nBeam3: N/A\nAvg: {snr_avg_str} dB"
         )
         
+        # Extract pressure data
+        raw_pressure = self._parse_float(point_data.get("Raw Pressure (dbar)"))
+        gauge_pressure = self._parse_float(point_data.get("Gauge Pressure (dbar)"))
+
+        raw_pres_str = f"{raw_pressure:.4f}" if raw_pressure is not None else "--"
+        gauge_pres_str = f"{gauge_pressure:.4f}" if gauge_pressure is not None else "--"
+        self.pressure_label.setText(f"Raw:   {raw_pres_str} dbar\nGauge: {gauge_pres_str} dbar")
+
         self.status_label.setText("● Data available")
         self.status_label.setStyleSheet("color: #28a745; font-size: 9pt; padding-top: 4px;")
 

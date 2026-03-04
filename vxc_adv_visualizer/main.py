@@ -2,19 +2,25 @@
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication
 
 from vxc_adv_visualizer.gui.main_window import MainWindow
 
-# Configure logging
+# Configure logging — rotate at 5 MB, keep 3 backups so logs never balloon on long runs
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('vxc_adv_system.log'),
-        logging.StreamHandler()
+        RotatingFileHandler(
+            'vxc_adv_system.log',
+            maxBytes=5 * 1024 * 1024,  # 5 MB per file
+            backupCount=3,             # Keep .log, .log.1, .log.2, .log.3
+            encoding='utf-8',
+        ),
+        logging.StreamHandler(sys.stdout),  # Explicit stdout avoids Windows cp1252 stderr issues
     ]
 )
 logger = logging.getLogger(__name__)

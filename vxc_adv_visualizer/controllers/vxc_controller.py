@@ -114,7 +114,7 @@ class VXCController:
                 # Send command
                 self.ser.write((command + terminator).encode('ascii'))
                 self.ser.flush()
-                logger.debug(f"→ {command}")
+                logger.debug(f">> {command}")
 
                 if wait_for_response:
                     response = ""
@@ -415,7 +415,7 @@ class VXCController:
         dx = target_x - current_x
         dy = target_y - current_y
         
-        logger.info(f"=== JOG START: ({current_x}, {current_y}) → ({target_x}, {target_y}) ===")
+        logger.info(f"=== JOG START: ({current_x}, {current_y}) -> ({target_x}, {target_y}) ===")
         logger.info(f"Movement delta: X={dx:+d} steps, Y={dy:+d} steps")
         
         # Calculate timeout with enhanced safety margins:

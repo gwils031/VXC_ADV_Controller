@@ -1,358 +1,313 @@
-# VXC/ADV Flow Measurement System - Phase 2 Complete ✅
+﻿# VXC/ADV Controller
 
-## Quick Start (30 seconds)
+PyQt5 desktop application for controlling a Velmex VXC XY stage and automatically
+merging SonTek FlowTracker2 ADV exports with logged motor positions.
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+---
 
-# Launch application
-python vxc_adv_visualizer/main.py
+## Quick Start
+
+```powershell
+# 1 — Activate the virtual environment
+.\.venv\Scripts\Activate.ps1
+
+# 2 — Install / update dependencies (first time only)
+pip install -r vxc_adv_visualizer/requirements.txt
+
+# 3 — Launch
+python -m vxc_adv_visualizer.main
+
+cd "C:\App Development\ADV&VXC Controller"; python -m vxc_adv_visualizer.main
 ```
 
-## Minimal ADV MVP (no GUI)
-
-Use this to validate ADV streaming without the full application.
-
-1) Set ADV parameters in [vxc_adv_visualizer/config/adv_config.yaml](vxc_adv_visualizer/config/adv_config.yaml)
-2) Run:
-   - python vxc_adv_visualizer/mvp/adv_stream_mvp.py --duration 10
-   - Add --raw to print raw lines (no parsing)
-
-**Expected Result**: PyQt5 window appears with 4 tabs (Calibration, Acquisition, Configuration, Export)
+The GUI opens immediately. Hardware connections are optional — all tabs are
+accessible without a connected VXC or ADV instrument.
 
 ---
 
-## What's New in Phase 2?
+## Application Layout
 
-✅ **Complete PyQt5 GUI** - Professional user interface with 4 functional tabs
-✅ **Jog Controls** - Press-and-hold arrow buttons for smooth motor control
-✅ **Acquisition Workflow** - Start/Pause/Resume/Stop/Emergency Stop
-✅ **Live Status Display** - Real-time Froude number, flow regime, depth
-✅ **Configuration Management** - Persistent YAML-based settings
-✅ **Multi-Format Export** - CSV, HDF5, VTK formats
-✅ **Comprehensive Documentation** - 2,750 lines across 8 guides
-✅ **28 Test Cases** - Ready for hardware validation
-✅ **Thread-Safe Architecture** - Non-blocking acquisition in background
+The window contains four tabs:
 
----
-
-## Documentation Map
-
-### 👨‍💼 Executive
-- [PHASE2_SUMMARY.md](PHASE2_SUMMARY.md) - What was delivered (5 min read)
-- [COMPLETION_CERTIFICATE.md](COMPLETION_CERTIFICATE.md) - Formal sign-off
-
-### 👨‍💻 For Developers
-- [DELIVERY_MANIFEST.md](DELIVERY_MANIFEST.md) - Files and changes
-- [docs/GUI_IMPLEMENTATION_GUIDE.md](docs/GUI_IMPLEMENTATION_GUIDE.md) - Architecture details
-- [vxc_adv_visualizer/gui/main_window.py](vxc_adv_visualizer/gui/main_window.py) - Source code (921 lines)
-
-### 🧪 For QA/Testers
-- [docs/GUI_TESTING_GUIDE.md](docs/GUI_TESTING_GUIDE.md) - 28 test cases with procedures
-- [docs/QUICK_REFERENCE_CARD.md](docs/QUICK_REFERENCE_CARD.md) - Operator cheat sheet
-
-### 🔧 For Support
-- [docs/GUI_TROUBLESHOOTING_GUIDE.md](docs/GUI_TROUBLESHOOTING_GUIDE.md) - 100+ solutions
-
-### 📖 Full Index
-- [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) - Complete documentation guide
+| Tab | Purpose |
+|-----|---------|
+| **VXC Controller** | Connect the stage, jog manually, position via sliders |
+| **Auto-Merge** | Session management and automatic ADV+VXC file merging |
+| **Live Data** | 2-D velocity-vector plot updated live from merged output |
+| **Cross-Section** | Automated multi-point scan routes (vertical / horizontal / grid) |
 
 ---
 
-## Project Structure
+## Tab Reference
+
+### VXC Controller
+
+**Connection group**
+- Select the COM port from the dropdown (populated on startup).
+- Click **Auto Detect VXC** to scan all ports and connect to the first
+  responding Velmex controller.
+- Click **Disconnect** to release the port cleanly.
+- Status label shows *Not Connected* (red) or *Connected — COM X* (green).
+
+**Current Position group**
+- Displays live X and Y coordinates in metres, updated at ~2 Hz while connected.
+
+**Jog Controls group**
+- Select a jog distance from the dropdown: 6.35 mm, 12.7 mm, 19.05 mm, or 25.4 mm.
+- Press and hold **X−**, **X+**, **Y−**, **Y+** arrow buttons to jog continuously.
+  Releasing the button stops motion.
+
+**Jog to Position (X→Y) group**
+- Two sliders set absolute target positions within the stage travel envelope:
+  - X: 0 → 1051.9 mm (left = origin)
+  - Y: 0 → 366.1 mm (bottom = origin)
+- Drag a slider to the desired coordinate, then click **GO**.
+- The GO button is disabled until the VXC is connected.
+- While a move is in progress the GO button is greyed out and a status
+  message shows which axis is moving. Double-pressing GO during a move is
+  ignored.
+- Live position updates are paused for the duration of the move to avoid
+  feedback against the sliders.
+
+**Zero / utility buttons**
+- **Zero Position** — marks the current motor position as (0, 0) in firmware.
+- **Find Origin** — runs both axes to the hardware limit switches and re-zeroes.
+
+---
+
+### Auto-Merge
+
+Watches an ADV export folder for new FlowTracker2 CSV files and merges them
+with the nearest-in-time VXC position log entry to produce per-file merged
+CSVs and rolling session-wide summary files.
+
+**Session Management group**
+
+| Control | Description |
+|---------|-------------|
+| Session Name | Free-text label used as the output sub-folder name |
+| Operator | Optional operator name written to the session metadata |
+| Notes | Brief experiment description |
+| **Start Session** (green) | Creates the output folder and begins accumulating files |
+| **End Session** (red) | Flushes remaining data and closes the session |
+| **Browse…** | Opens the output folder in Explorer |
+
+A session must be active before monitoring can start. When the application
+launches it automatically creates a session named `Session_<YYYYMMDD>`.
+
+**Directory Configuration group**
+
+| Field | Default |
+|-------|---------|
+| ADV Watch Folder | `ADV_Data/` |
+| VXC Positions Folder | `VXC_Positions/` |
+| Output Folder | `Data_Output/` |
+
+Click **Browse** next to any field to change it. Paths are persisted in the
+Windows registry between runs.
+
+**Monitoring Control group**
+- **Start Monitoring** — begins watching the ADV folder; any `.csv` files
+  added after this point are automatically processed. Existing files are
+  skipped (pre-marked on startup).
+- **Stop Monitoring** — halts the watcher.
+- Status bar shows the monitoring state and number of files processed.
+
+**Output files (per session)**
+
+| File | Contents |
+|------|----------|
+| `<timestamp>_merged.csv` | One row per ADV sample with matched VXC X/Y |
+| `<timestamp>_averaged.csv` | Row per ADV file, spatially averaged velocities |
+| `master_merged.csv` | All merged rows accumulated across the session |
+| `master_averaged.csv` | All averaged rows accumulated across the session |
+
+Every new averaged file triggers a **Live Data** tab update automatically.
+
+**Activity Log** — scrollable text log of merge results capped at 500 lines.
+
+---
+
+### Live Data
+
+Displays normalized velocity vectors (quiver arrows) overlaid on a flume
+cross-section diagram. The plot updates whenever Auto-Merge produces a new
+averaged output file.
+
+- **↻ Reload** — re-reads the last averaged CSV and redraws immediately.
+- The colourbar shows normalised velocity magnitude.
+- A magenta marker indicates the current VXC position if the stage is
+  connected and moving.
+- Valid-point counter (top bar) shows how many positions have usable
+  velocity data.
+
+---
+
+### Cross-Section
+
+Plans and executes automated multi-point measurement routes. The VXC must be
+connected first.
+
+**Route Configuration group**
+
+| Scan Type | Description |
+|-----------|-------------|
+| Vertical Line | Evenly spaced points along a fixed X, varying Y |
+| Horizontal Line | Evenly spaced points along a fixed Y, varying X |
+| XY Grid | Full rectangular grid of N×M points |
+
+Configure start/end coordinates and number of points (or spacing) using the
+input fields. Click **Preview Route** to visualise the points in the preview
+pane before committing.
+
+**Route parameters**
+- **Dwell time** — seconds the instrument dwells at each point (default 60 s,
+  read from `experiment_config.yaml`).
+- **Settling time** — pause after each move before starting data acquisition
+  (default 2 s).
+- **Y tolerance warning / hard stop** — configurable step thresholds that
+  warn or abort if the Y axis deviates during a move.
+
+**Automation Control group**
+
+| Button | Action |
+|--------|--------|
+| **Start** | Begin executing the planned route |
+| **Pause** | Hold at current position (resumes from same point) |
+| **Resume** | Continue after a pause |
+| **Stop** | Abort the run and return to origin |
+| **Skip Position** | Skip the current dwell and advance to the next point |
+
+A progress bar, ETA countdown, and per-position status are displayed while
+a run is active.
+
+---
+
+## Configuration Files
+
+### `vxc_adv_visualizer/config/vxc_config.yaml`
+
+Controls the serial connection to the Velmex VXC.
+
+```yaml
+port: COM8          # Change to your actual COM port
+baudrate: 57600
+timeout: 2.0
+steps_per_foot: 46000
+motion_timeout_sec: 60
+```
+
+### `vxc_adv_visualizer/config/experiment_config.yaml`
+
+Controls automation defaults and session behaviour.
+
+```yaml
+automation:
+  default_dwell_time_sec: 60.0
+  movement_settling_time_sec: 2.0
+  default_vertical_points: 10
+  default_horizontal_points: 15
+
+sessions:
+  base_output_dir: "Data_Output"
+  auto_create_on_start: true
+
+environment:
+  atmospheric_pressure_dbar: 8.5   # adjust for your site elevation
+```
+
+---
+
+## Directory Structure
 
 ```
-c:\App Development\ADV&VXC Controller\
-│
-├── 📄 COMPLETION_CERTIFICATE.md .......... Formal delivery document
-├── 📄 PHASE2_SUMMARY.md ................. Executive overview
-├── 📄 DELIVERY_MANIFEST.md .............. Validation checklist
-├── 📄 DOCUMENTATION_INDEX.md ............ Documentation guide
-│
-├── requirements.txt ..................... Python dependencies
-│
-├── docs/ [NEW PHASE 2 DOCUMENTATION]
-│   ├── PHASE2_COMPLETION_REPORT.md ....... Delivery details
-│   ├── GUI_IMPLEMENTATION_GUIDE.md ....... Architecture
-│   ├── GUI_TESTING_GUIDE.md .............. Test procedures (28 cases)
-│   ├── GUI_TROUBLESHOOTING_GUIDE.md ...... Support solutions (100+)
-│   └── QUICK_REFERENCE_CARD.md ........... Operator guide
-│
+ADV&VXC Controller/
+├── .venv/                          Python virtual environment
+├── ADV_Data/                       Drop FlowTracker2 exports here
+├── VXC_Positions/                  VXC position log CSVs (auto-written)
+├── Data_Output/                    Merged and averaged output
+│   └── <session_name>/
+│       ├── master_averaged.csv
+│       ├── master_merged.csv
+│       └── <timestamp>_merged.csv  (one per ADV file)
+├── vxc_adv_system.log              Rotating log (5 MB × 3 backups)
+├── vxc_adv_visualizer/
+│   ├── main.py                     Entry point
+│   ├── config/
+│   │   ├── experiment_config.yaml
+│   │   └── vxc_config.yaml
+│   ├── gui/
+│   │   ├── main_window.py          Main window + VXC Controller tab
+│   │   ├── auto_merge_tab.py       Auto-Merge tab
+│   │   ├── live_data_tab.py        Live Data tab
+│   │   ├── cross_section_tab.py    Cross-Section tab
+│   │   └── range_slider.py         Shared widget
+│   ├── controllers/                VXC and ADV hardware drivers
+│   ├── data/                       Session manager, merger, logger
+│   └── monitoring/                 File-system watcher
 └── vxc_adv_visualizer/
-    ├── gui/ [NEW PHASE 2 GUI]
-    │   ├── __init__.py
-    │   └── main_window.py ............... 921-line PyQt5 GUI
-    │
-    ├── main.py [UPDATED]
-    │   └─ Changed to PyQt5 launch with Application class
-    │
-    ├── [All Phase 1 modules unchanged]
-    │   ├── controllers/ (VXC + ADV drivers)
-    │   ├── acquisition/ (Sampler, Calibration, Synchronizer)
-    │   ├── data/ (Data model, Logger, Exporters)
-    │   ├── utils/ (Calculations, Timing, Serial, Validation)
-    │   ├── visualization/ (Post-processing)
-    │   └── config/ (YAML templates)
-    │
-    └── [Phase 1 Documentation]
-        ├── README.md
-        ├── QUICKSTART.md
-        ├── IMPLEMENTATION_STATUS.md
-        ├── ROADMAP.md
-        ├── COMPLETION_REPORT.md
-        └── INDEX.md [UPDATED with Phase 2 refs]
+    └── requirements.txt
 ```
 
 ---
 
-## Key Features
+## Typical Workflow
 
-### Calibration Tab
-- **Port Detection**: Auto-discovers COM ports
-- **Hardware Connection**: Simultaneous VXC + ADV initialization
-- **Jog Controls**: 3 speed levels (fine, medium, coarse)
-- **Direct Positioning**: Absolute coordinate input
-- **Grid Setup**: Origin/boundary capture + grid generation
+### Manual positioning + single measurement
+1. Connect VXC via **Auto Detect VXC** on the VXC Controller tab.
+2. Jog to the desired position using arrow buttons or the position sliders.
+3. Open Auto-Merge tab → confirm session is active → click **Start Monitoring**.
+4. Trigger a FlowTracker2 measurement. The resulting CSV lands in `ADV_Data/`.
+5. The merge runs automatically; the Live Data tab updates.
 
-### Acquisition Tab
-- **Control Buttons**: Start, Pause, Resume, Emergency Stop
-- **Live Status**: Froude number, flow regime, depth display
-- **Progress Tracking**: Position count + visual progress bar
-- **Adaptive Sampling**: Extended duration for supercritical flows (Fr > 1.0)
-- **Return Home**: Move to origin after measurement
-
-### Configuration Tab
-- **Grid Spacing**: X and Y spacing in feet
-- **Froude Threshold**: Critical flow indicator (default 1.0)
-- **Sampling Durations**: Base (subcritical) and extended (supercritical)
-- **ADV Quality**: SNR and correlation thresholds
-- **Persistence**: Settings saved to YAML
-
-### Export Tab
-- **Format Selection**: CSV, HDF5, VTK, or all formats
-- **Direct Integration**: Connected to Phase 1 exporters
-- **3D Compilation**: Placeholder for multi-plane stacking
-
----
-
-## Installation
-
-### Step 1: Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-**Dependencies**:
-- PyQt5 >= 5.15.0
-- pyqtgraph >= 0.13.0
-- pyserial >= 3.5
-- numpy, scipy, h5py, PyYAML
-
-### Step 2: Verify Installation
-```bash
-python -c "from gui.main_window import MainWindow; print('✓ GUI ready')"
-```
-
-### Step 3: Run Application
-```bash
-cd vxc_adv_visualizer
-python main.py
-```
-
----
-
-## First-Time Usage
-
-### Minimal Workflow (15 minutes)
-
-1. **Connect Hardware**
-   - Click "Refresh Ports"
-   - Select VXC port (usually COM3)
-   - Select ADV port (usually COM4)
-   - Click "Connect"
-
-2. **Calibrate Grid** (2 minutes)
-   - Position motor at origin (0,0)
-   - Click "Zero Origin"
-   - Move to opposite corner
-   - Click "Capture Boundary"
-   - Set spacing (X=0.1, Y=0.05 feet)
-   - Click "Generate Grid"
-
-3. **Start Measurement** (1 minute)
-   - Go to "Acquisition" tab
-   - Click "Start Acquisition"
-   - Enter Z-plane coordinate (e.g., 0.5)
-   - Monitor progress
-
-4. **Export Data** (<1 minute)
-   - Go to "Export" tab
-   - Select format (CSV recommended for first test)
-   - Click "Export Data"
-   - Choose filename and directory
+### Automated cross-section
+1. Connect VXC.
+2. Start a session on the Auto-Merge tab and enable monitoring.
+3. Switch to the Cross-Section tab.
+4. Select scan type, set coordinates and dwell time.
+5. Click **Preview Route** to verify.
+6. Click **Start** — the stage moves point-to-point, triggering the ADV
+   at each position. Progress and ETA are shown in real time.
 
 ---
 
 ## System Requirements
 
-- **Python**: 3.7-3.11+
-- **OS**: Windows 10/11, macOS 10.13+, Linux Ubuntu 16.04+
-- **RAM**: 256 MB minimum (512 MB recommended)
-- **Disk**: 100 MB for dependencies
-- **USB**: 2 available ports (VXC + ADV controllers)
-
-### Hardware Requirements
-
-- **Velmex VXC** motor controller (USB, 9600 baud ASCII)
-- **SonTek FlowTracker2** ADV sensor (USB, 19200 baud)
-- **XY Positioning Stage** connected to VXC
-
----
-
-## Testing
-
-### Quick Validation (5 minutes)
-
-```bash
-python -c "
-from gui.main_window import MainWindow
-from PyQt5.QtWidgets import QApplication
-app = QApplication([])
-window = MainWindow()
-print('✓ GUI initialized successfully')
-print(f'✓ Tabs available: Calibration, Acquisition, Configuration, Export')
-print(f'✓ Ready for hardware connection')
-"
-```
-
-### Full Test Suite (2-3 hours with hardware)
-
-See [docs/GUI_TESTING_GUIDE.md](docs/GUI_TESTING_GUIDE.md) for 28 test cases
+- Windows 10 / 11
+- Python 3.10 or later (tested on 3.13)
+- Two USB ports (VXC on one, FlowTracker2 on another)
+- Velmex VXC controller (57600 baud)
+- SonTek FlowTracker2 (exports CSV to a watched folder)
 
 ---
 
 ## Troubleshooting
 
-### "ModuleNotFoundError: No module named 'PyQt5'"
-```bash
-pip install PyQt5
+**App does not start — `ModuleNotFoundError`**
+```powershell
+pip install -r vxc_adv_visualizer/requirements.txt
 ```
 
-### "Cannot connect to VXC"
-1. Check USB cable connection
-2. Verify correct COM port in dropdown
-3. Ensure device is powered on
-4. See [docs/GUI_TROUBLESHOOTING_GUIDE.md](docs/GUI_TROUBLESHOOTING_GUIDE.md) for detailed solutions
+**VXC not detected by Auto Detect**
+- Check the USB cable and power.
+- Open Device Manager and note the COM port; set it manually in
+  `vxc_config.yaml` or the port dropdown.
+- Ensure no other application (e.g. VXC software) has the port open.
 
-### Application crashes on startup
-1. Check Python version: `python --version` (should be 3.7+)
-2. Reinstall dependencies: `pip install -r requirements.txt --upgrade`
-3. Check error log: `vxc_adv_system.log`
+**ADV files not being merged**
+- Confirm monitoring is *Started* (green indicator).
+- Confirm the watch folder matches where FlowTracker2 saves exports.
+- Check `vxc_adv_system.log` for error messages.
 
-**Full troubleshooting guide**: [docs/GUI_TROUBLESHOOTING_GUIDE.md](docs/GUI_TROUBLESHOOTING_GUIDE.md)
+**GO button does not re-enable after a jog**
+- If the serial port was lost mid-move, use **Disconnect** then reconnect.
+  The cleanup path restores the button state on disconnect.
 
----
-
-## Development
-
-### Extending the GUI
-
-All extension points documented in:
-- [docs/GUI_IMPLEMENTATION_GUIDE.md](docs/GUI_IMPLEMENTATION_GUIDE.md) - Architecture
-- [vxc_adv_visualizer/gui/main_window.py](vxc_adv_visualizer/gui/main_window.py) - Source code
-
-### Key Classes
-
-- `MainWindow` - Main PyQt5 window, 55 methods
-- `AcquisitionWorker` - Non-blocking measurement thread
-- Integration points: All Phase 1 modules connected
-
-### Known Limitations (Phase 2)
-
-1. **Heatmap Data Binding**: Skeleton implemented, data binding TODO (~50 lines)
-2. **3D Compilation**: Button visible, file dialog logic deferred (~100 lines)
-3. **Velocity Vectors**: Not visualized (Phase 3 feature)
-
----
-
-## Performance
-
-| Operation | Performance | Notes |
-|-----------|-------------|-------|
-| Jog Response | 50ms | Imperceptible lag |
-| Position Update | 2 Hz | Real-time display |
-| Grid Generation | ~100ms | Fast |
-| Export to CSV | <1s | Typical 21 positions |
-| Memory (idle) | 150 MB | Efficient |
-
----
-
-## Next Steps
-
-### Immediate (Hardware Testing)
-1. Execute test procedures from [docs/GUI_TESTING_GUIDE.md](docs/GUI_TESTING_GUIDE.md)
-2. Test with physical VXC/ADV equipment
-3. Gather user feedback
-4. Document any issues
-
-### Short Term (Phase 3 Planning)
-1. Complete heatmap data binding (~50 lines)
-2. Implement 3D compilation UI (~100 lines)
-3. Add velocity vector visualization (~200 lines)
-
-### Medium Term (Phase 3 Development)
-1. Multi-plane Z-stack support
-2. Advanced visualization (contours, turbulence maps)
-3. ParaView integration
-
----
-
-## Support
-
-### Documentation
-- **Quick Start**: Read [docs/QUICK_REFERENCE_CARD.md](docs/QUICK_REFERENCE_CARD.md)
-- **Operators**: See [docs/QUICK_REFERENCE_CARD.md](docs/QUICK_REFERENCE_CARD.md)
-- **Developers**: See [docs/GUI_IMPLEMENTATION_GUIDE.md](docs/GUI_IMPLEMENTATION_GUIDE.md)
-- **Testers**: See [docs/GUI_TESTING_GUIDE.md](docs/GUI_TESTING_GUIDE.md)
-- **Support Staff**: See [docs/GUI_TROUBLESHOOTING_GUIDE.md](docs/GUI_TROUBLESHOOTING_GUIDE.md)
-
-### Contact
-For technical questions, refer to inline code documentation in:
-- [vxc_adv_visualizer/gui/main_window.py](vxc_adv_visualizer/gui/main_window.py) (921 lines with docstrings)
-
----
-
-## Version Information
-
-- **Phase 1**: Core engine + hardware abstraction (Complete)
-- **Phase 2**: PyQt5 GUI + comprehensive documentation (✅ Complete)
-- **Phase 3**: Advanced visualization + 3D compilation (Planned)
-
-**Current Status**: ✅ **PHASE 2 COMPLETE - READY FOR DEPLOYMENT**
-
----
-
-## License & Credits
-
-See individual module documentation for hardware credits:
-- Velmex VXC controller documentation
-- SonTek FlowTracker2 documentation
-- PyQt5 documentation (Riverbank Computing)
+**Log location**: `vxc_adv_system.log` in the workspace root, rotated at
+5 MB with 3 backups (`...log.1`, `...log.2`, `...log.3`).
 
 ---
 
 ## Last Updated
 
-**Phase**: 2 - GUI Implementation  
-**Date**: Phase 2 Release  
-**Status**: ✅ Complete and Validated
-
----
-
-**Questions?** Start here:
-1. [PHASE2_SUMMARY.md](PHASE2_SUMMARY.md) - What's new?
-2. [docs/QUICK_REFERENCE_CARD.md](docs/QUICK_REFERENCE_CARD.md) - How do I use it?
-3. [docs/GUI_TROUBLESHOOTING_GUIDE.md](docs/GUI_TROUBLESHOOTING_GUIDE.md) - Something went wrong?
-4. [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) - Full documentation map
-
+March 4, 2026
