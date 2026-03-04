@@ -63,6 +63,19 @@ hidden_imports = [
     'serial',
     'serial.tools',
     'serial.tools.list_ports',
+    # stdlib modules PyInstaller misses on Python 3.13
+    'html',
+    'html.parser',
+    'html.entities',
+    'urllib',
+    'urllib.parse',
+    'urllib.request',
+    'urllib.error',
+    'email',
+    'email.mime',
+    'email.mime.text',
+    'logging.handlers',
+    'xml.etree.ElementTree',
 ]
 
 # Collect all pyqtgraph sub-modules (it uses plugin-style dynamic imports)
