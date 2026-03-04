@@ -65,6 +65,16 @@ class MergeWorkerThread(QThread):
             # Matched-only samples (VXC position was found)
             matched_samples = [s for s in all_merged if s.get('vxc_quality') != 'MISSING']
 
+            # Remap merger key names → session schema key names so the raw
+            # DictWriter (which expects x_m / y_m / time_delta_ms / timestamp_utc)
+            # gets the correct values.  The averaged path does its own remap a
+            # few lines below; this closes the same gap for per-sample rows.
+            for s in matched_samples:
+                s['x_m'] = s.get('vxc_x_m')
+                s['y_m'] = s.get('vxc_y_m')
+                s['time_delta_ms'] = s.get('vxc_time_delta_ms')
+                s['timestamp_utc'] = s.get('UTC time') or s.get('timestamp_utc')
+
             # Build averaged dict from matched samples only
             avg_data_dict = {}
             if matched_samples:
