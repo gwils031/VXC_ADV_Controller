@@ -16,8 +16,13 @@ pip install -r vxc_adv_visualizer/requirements.txt
 
 # 3 — Launch
 python -m vxc_adv_visualizer.main
+```
 
-cd "C:\App Development\ADV&VXC Controller"; python -m vxc_adv_visualizer.main
+If launching from outside the workspace root:
+
+```powershell
+cd "C:\App Development\ADV&VXC Controller"
+python -m vxc_adv_visualizer.main
 ```
 
 The GUI opens immediately. Hardware connections are optional — all tabs are
@@ -27,7 +32,7 @@ accessible without a connected VXC or ADV instrument.
 
 ## Application Layout
 
-The window contains four tabs:
+The window contains five tabs:
 
 | Tab | Purpose |
 |-----|---------|
@@ -35,6 +40,7 @@ The window contains four tabs:
 | **Auto-Merge** | Session management and automatic ADV+VXC file merging |
 | **Live Data** | 2-D velocity-vector plot updated live from merged output |
 | **Cross-Section** | Automated multi-point scan routes (vertical / horizontal / grid) |
+| **Cross-Section View** | Downstream-view cross-section plot with velocity/turbulence color modes |
 
 ---
 
@@ -186,6 +192,20 @@ a run is active.
 
 ---
 
+### Cross-Section View
+
+Displays measured points in a downstream-looking cross-section visualization:
+
+- Arrows represent in-plane components `(Vy, Vz)`.
+- Point color mode can be switched between:
+  - **Velocity |V|**
+  - **TKE**
+  - **Reynolds tau_xz**
+- Click any point to inspect position, velocity, quality, and turbulence metrics.
+- Import historical session averaged CSVs using **Import Session Data**.
+
+---
+
 ## Configuration Files
 
 ### `vxc_adv_visualizer/config/vxc_config.yaml`
@@ -235,6 +255,7 @@ ADV&VXC Controller/
 │       └── <timestamp>_merged.csv  (one per ADV file)
 ├── vxc_adv_system.log              Rotating log (5 MB × 3 backups)
 ├── vxc_adv_visualizer/
+│   ├── requirements.txt            Python dependencies
 │   ├── main.py                     Entry point
 │   ├── config/
 │   │   ├── experiment_config.yaml
@@ -243,13 +264,14 @@ ADV&VXC Controller/
 │   │   ├── main_window.py          Main window + VXC Controller tab
 │   │   ├── auto_merge_tab.py       Auto-Merge tab
 │   │   ├── live_data_tab.py        Live Data tab
-│   │   ├── cross_section_tab.py    Cross-Section tab
+│   │   ├── cross_section_tab.py    Cross-Section automation tab
+│   │   ├── cross_section_view_tab.py Cross-Section visualization tab
 │   │   └── range_slider.py         Shared widget
 │   ├── controllers/                VXC and ADV hardware drivers
 │   ├── data/                       Session manager, merger, logger
-│   └── monitoring/                 File-system watcher
-└── vxc_adv_visualizer/
-    └── requirements.txt
+│   ├── monitoring/                 File-system watcher
+│   └── utils/                      Shared utility modules
+└── tests/                          Unit and integration-style tests
 ```
 
 ---
@@ -313,4 +335,4 @@ pip install -r vxc_adv_visualizer/requirements.txt
 
 ## Last Updated
 
-March 4, 2026
+March 26, 2026
