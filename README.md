@@ -119,10 +119,13 @@ Windows registry between runs.
 |------|----------|
 | `<timestamp>_merged.csv` | One row per ADV sample with matched VXC X/Y |
 | `<timestamp>_averaged.csv` | Row per ADV file, spatially averaged velocities |
-| `master_merged.csv` | All merged rows accumulated across the session |
-| `master_averaged.csv` | All averaged rows accumulated across the session |
+| `master_merged.csv` | All merged rows accumulated across the session, including per-sample turbulence terms (`u_prime_*`, squared terms, and `u_prime_x_u_prime_z`) |
+| `master_averaged.csv` | All averaged rows accumulated across the session, including `TI_x/y/z`, `TKE`, `u_prime_x_u_prime_z_cov`, freshwater `rho`, and `Reynolds tau_xz` |
 
 Every new averaged file triggers a **Live Data** tab update automatically.
+
+Turbulence metrics are calculated after timestamp merge and before averaged-row write,
+using corrected velocity components and Reynolds decomposition for each ADV file.
 
 **Activity Log** — scrollable text log of merge results capped at 500 lines.
 

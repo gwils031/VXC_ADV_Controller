@@ -3,6 +3,7 @@
 import logging
 import time
 import re
+import math
 from pathlib import Path
 from typing import Optional, Dict, Set, List, Tuple
 from datetime import datetime, timedelta, timezone
@@ -131,6 +132,83 @@ class MergeWorkerThread(QThread):
                 if 'Raw Pressure (dbar)' in avg_data_dict:
                     atm = merger._load_atmospheric_pressure()
                     avg_data_dict['Gauge Pressure (dbar)'] = float(avg_data_dict['Raw Pressure (dbar)']) - atm
+
+                # Turbulence metrics from corrected velocity fluctuations.
+                ux_vals = _safe_floats(matched_samples, 'Corrected Velocity.X (m/s)')
+                uy_vals = _safe_floats(matched_samples, 'Corrected Velocity.Y (m/s)')
+                uz_vals = _safe_floats(matched_samples, 'Corrected Velocity.Z (m/s)')
+
+                ux_mean = (sum(ux_vals) / len(ux_vals)) if ux_vals else None
+                uy_mean = (sum(uy_vals) / len(uy_vals)) if uy_vals else None
+                uz_mean = (sum(uz_vals) / len(uz_vals)) if uz_vals else None
+
+                ux2_terms: List[float] = []
+                uy2_terms: List[float] = []
+                uz2_terms: List[float] = []
+                uxuz_terms: List[float] = []
+
+                for s in matched_samples:
+                    ux = merger._parse_float(s.get('Corrected Velocity.X (m/s)'))
+                    uy = merger._parse_float(s.get('Corrected Velocity.Y (m/s)'))
+                    uz = merger._parse_float(s.get('Corrected Velocity.Z (m/s)'))
+
+                    if ux is not None and ux_mean is not None:
+                        upx = ux - ux_mean
+                        s['u_prime_x (m/s)'] = upx
+                        s['u_prime_x2 (m2/s2)'] = upx * upx
+                        ux2_terms.append(upx * upx)
+
+                    if uy is not None and uy_mean is not None:
+                        upy = uy - uy_mean
+                        s['u_prime_y (m/s)'] = upy
+                        s['u_prime_y2 (m2/s2)'] = upy * upy
+                        uy2_terms.append(upy * upy)
+
+                    if uz is not None and uz_mean is not None:
+                        upz = uz - uz_mean
+                        s['u_prime_z (m/s)'] = upz
+                        s['u_prime_z2 (m2/s2)'] = upz * upz
+                        uz2_terms.append(upz * upz)
+
+                    if ux is not None and ux_mean is not None and uz is not None and uz_mean is not None:
+                        upx_upz = (ux - ux_mean) * (uz - uz_mean)
+                        s['u_prime_x_u_prime_z (m2/s2)'] = upx_upz
+                        uxuz_terms.append(upx_upz)
+
+                var_x = (sum(ux2_terms) / len(ux2_terms)) if ux2_terms else None
+                var_y = (sum(uy2_terms) / len(uy2_terms)) if uy2_terms else None
+                var_z = (sum(uz2_terms) / len(uz2_terms)) if uz2_terms else None
+
+                if var_x is not None:
+                    avg_data_dict['TI_x (m/s)'] = math.sqrt(var_x)
+                if var_y is not None:
+                    avg_data_dict['TI_y (m/s)'] = math.sqrt(var_y)
+                if var_z is not None:
+                    avg_data_dict['TI_z (m/s)'] = math.sqrt(var_z)
+
+                if var_x is not None and var_y is not None and var_z is not None:
+                    avg_data_dict['TKE (m2/s2)'] = 0.5 * (var_x + var_y + var_z)
+
+                cov_ux_uz = (sum(uxuz_terms) / len(uxuz_terms)) if uxuz_terms else None
+                if cov_ux_uz is not None:
+                    avg_data_dict['u_prime_x_u_prime_z_cov (m2/s2)'] = cov_ux_uz
+
+                # Freshwater density from temperature-only polynomial (kg/m^3), 0-40 C range.
+                temp_c = merger._parse_float(avg_data_dict.get('Temperature (C)'))
+                if cov_ux_uz is not None and temp_c is not None:
+                    rho = (
+                        999.842594
+                        + 6.793952e-2 * temp_c
+                        - 9.09529e-3 * (temp_c ** 2)
+                        + 1.001685e-4 * (temp_c ** 3)
+                        - 1.120083e-6 * (temp_c ** 4)
+                        + 6.536332e-9 * (temp_c ** 5)
+                    )
+                    avg_data_dict['rho_freshwater (kg/m3)'] = rho
+                    avg_data_dict['Reynolds tau_xz (Pa)'] = -rho * cov_ux_uz
+
+            # Mark validity so session statistics can count valid measurements
+            avg_data_dict['status'] = 'OK' if matched_samples else 'INVALID'
 
             # Append matched samples + averaged summary to the session master files
             try:

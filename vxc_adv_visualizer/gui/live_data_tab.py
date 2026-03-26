@@ -27,11 +27,19 @@ class LiveDataTab(QWidget):
 
     STEPS_PER_INCH = 4000.0
     METERS_PER_FOOT = 0.3048
-    PLANE_X_STEPS = (0, 165654)  # Positive X axis: 0 to ~1.0519m
-    PLANE_Y_STEPS = (0, 57651)   # Positive Y axis: 0 to ~0.3661m
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, boundaries: dict = None):
         super().__init__(parent)
+        # Set boundaries (use defaults if not provided)
+        if boundaries is None:
+            boundaries = {
+                'x_min_steps': 0,
+                'x_max_steps': 165654,
+                'y_min_steps': 0,
+                'y_max_steps': 57651
+            }
+        self.boundaries = boundaries
+        
         self.last_avg_file: Optional[str] = None
         self.last_stats: Optional[dict] = None
         self.colorbar = None
@@ -286,6 +294,26 @@ class LiveDataTab(QWidget):
         """)
         stats_layout.addWidget(self.pressure_label)
 
+        # Turbulence section
+        turb_label = QLabel("Turbulence")
+        turb_label.setFont(vel_font)
+        turb_label.setStyleSheet("color: #212529; padding-top: 8px;")
+        stats_layout.addWidget(turb_label)
+
+        self.turbulence_label = QLabel("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
+        self.turbulence_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        stats_layout.addWidget(self.turbulence_label)
+
         # Status indicator
         self.status_label = QLabel("● Waiting for data")
         self.status_label.setStyleSheet("color: #6c757d; font-size: 9pt; padding-top: 4px;")
@@ -407,6 +435,11 @@ class LiveDataTab(QWidget):
             'Temperature (°C)', 'Raw Pressure (dbar)', 'Gauge Pressure (dbar)',
             'Corrected Pressure (dbar)', 'Depth (m)', 'Voltage (V)'
         ]
+        turbulence_keys = [
+            'TI_x (m/s)', 'TI_y (m/s)', 'TI_z (m/s)',
+            'TKE (m2/s2)', 'u_prime_x_u_prime_z_cov (m2/s2)',
+            'rho_freshwater (kg/m3)', 'Reynolds tau_xz (Pa)'
+        ]
         
         aggregated = {
             'x_m': f"{x_loc:.6f}",
@@ -417,7 +450,7 @@ class LiveDataTab(QWidget):
         }
         
         # Weighted average for each numeric field
-        for key in velocity_keys + quality_keys + env_keys:
+        for key in velocity_keys + quality_keys + env_keys + turbulence_keys:
             values_and_weights = []
             for row in rows:
                 val = self._parse_float(row.get(key))
@@ -587,8 +620,10 @@ class LiveDataTab(QWidget):
 
     def _plane_limits_m(self) -> Tuple[float, float, float, float]:
         """Return plane limits in meters based on step bounds."""
-        x_min_steps, x_max_steps = self.PLANE_X_STEPS
-        y_min_steps, y_max_steps = self.PLANE_Y_STEPS
+        x_min_steps = self.boundaries['x_min_steps']
+        x_max_steps = self.boundaries['x_max_steps']
+        y_min_steps = self.boundaries['y_min_steps']
+        y_max_steps = self.boundaries['y_max_steps']
 
         x_min_m = self._steps_to_meters(x_min_steps)
         x_max_m = self._steps_to_meters(x_max_steps)
@@ -596,6 +631,18 @@ class LiveDataTab(QWidget):
         y_max_m = self._steps_to_meters(y_max_steps)
         
         return (x_min_m, x_max_m, y_min_m, y_max_m)
+
+    def update_boundaries(self, boundaries: dict):
+        """Update workspace boundaries and redraw plot.
+        
+        Args:
+            boundaries: Dict with x_min_steps, x_max_steps, y_min_steps, y_max_steps
+        """
+        self.boundaries = boundaries
+        
+        # Redraw plot with new boundaries if data is loaded
+        if self._cached_rows:
+            self._plot_vectors(self._cached_rows)
 
     def update_current_position(self, x_m: float, y_m: float):
         """Update current VXC position marker on the plot.
@@ -619,6 +666,7 @@ class LiveDataTab(QWidget):
             self.correlation_label.setText("Beam1: N/A\nBeam2: N/A\nBeam3: N/A\nAvg: -- %")
             self.snr_label.setText("Beam1: N/A\nBeam2: N/A\nBeam3: N/A\nAvg: -- dB")
             self.pressure_label.setText("Raw:   -- dbar\nGauge: -- dbar")
+            self.turbulence_label.setText("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
             self.status_label.setText("● No data at position")
             self.status_label.setStyleSheet("color: #dc3545; font-size: 9pt; padding-top: 4px;")
             return
@@ -705,6 +753,26 @@ class LiveDataTab(QWidget):
         raw_pres_str = f"{raw_pressure:.4f}" if raw_pressure is not None else "--"
         gauge_pres_str = f"{gauge_pressure:.4f}" if gauge_pressure is not None else "--"
         self.pressure_label.setText(f"Raw:   {raw_pres_str} dbar\nGauge: {gauge_pres_str} dbar")
+
+        # Extract turbulence data
+        tix = self._parse_float(point_data.get("TI_x (m/s)"))
+        tiy = self._parse_float(point_data.get("TI_y (m/s)"))
+        tiz = self._parse_float(point_data.get("TI_z (m/s)"))
+        tke = self._parse_float(point_data.get("TKE (m2/s2)"))
+        tau_xz = self._parse_float(point_data.get("Reynolds tau_xz (Pa)"))
+
+        tix_str = f"{tix:.6f}" if tix is not None else "--"
+        tiy_str = f"{tiy:.6f}" if tiy is not None else "--"
+        tiz_str = f"{tiz:.6f}" if tiz is not None else "--"
+        tke_str = f"{tke:.6f}" if tke is not None else "--"
+        tau_xz_str = f"{tau_xz:.6f}" if tau_xz is not None else "--"
+        self.turbulence_label.setText(
+            f"TIx: {tix_str} m/s\n"
+            f"TIy: {tiy_str} m/s\n"
+            f"TIz: {tiz_str} m/s\n"
+            f"TKE: {tke_str} m2/s2\n"
+            f"Tau_xz: {tau_xz_str} Pa"
+        )
 
         self.status_label.setText("● Data available")
         self.status_label.setStyleSheet("color: #28a745; font-size: 9pt; padding-top: 4px;")
