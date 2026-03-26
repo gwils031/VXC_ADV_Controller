@@ -76,6 +76,7 @@ hidden_imports = [
     'email.mime.text',
     'logging.handlers',
     'xml.etree.ElementTree',
+    'unittest',
 ]
 
 # Collect all pyqtgraph sub-modules (it uses plugin-style dynamic imports)
@@ -96,7 +97,6 @@ a = Analysis(
     excludes=[
         'tkinter',
         'test',
-        'unittest',
         'xmlrpc',
         # Heavy ML/science packages not used by this app - keeps dist size small
         'torch',
