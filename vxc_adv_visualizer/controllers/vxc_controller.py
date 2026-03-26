@@ -32,6 +32,7 @@ class VXCController:
         self.timeout = timeout
         self.ser = None
         self.online = False
+        self.port_dead = False  # Set True on unrecoverable port-level errors
         self.last_command_error: Optional[str] = None
         self.lock = threading.Lock()
         
@@ -46,6 +47,7 @@ class VXCController:
             True if connection successful
         """
         try:
+            self.port_dead = False  # Reset on each connection attempt
             self.ser = serial.Serial(
                 port=self.port,
                 baudrate=self.baudrate,
@@ -98,6 +100,9 @@ class VXCController:
             logger.error("Not connected")
             return None
         
+        if self.port_dead:
+            return None
+        
         try:
             with self.lock:
                 self.last_command_error = None
@@ -146,7 +151,17 @@ class VXCController:
             
         except Exception as e:
             self.last_command_error = str(e)
-            logger.error(f"Command error: {e}")
+            # PermissionError from ClearCommError means the USB-serial driver
+            # doesn't support the Win32 IOCTL — the port is unrecoverable.
+            # Mark it dead so callers bail out immediately instead of flooding logs.
+            if isinstance(e, PermissionError) or 'ClearCommError' in str(e):
+                if not self.port_dead:
+                    self.port_dead = True
+                    self.online = False
+                    logger.error(f"Port {self.port} marked dead: {e}")
+                # Suppress subsequent per-call error spam
+            else:
+                logger.error(f"Command error: {e}")
             return None
     
     def go_online(self, echo: bool = False) -> None:
@@ -211,6 +226,10 @@ class VXCController:
             logger.error(f"Invalid motor number: {motor}")
             return None
         
+        # Bail immediately if the port is known dead
+        if self.port_dead:
+            return None
+
         # If we've determined the working terminator, try it first (optimization)
         if self._position_terminator_locked:
             response = self.send_command(
@@ -224,6 +243,8 @@ class VXCController:
                 return self._parse_position_response(response, motor)
             # If it failed, fall back to trying all terminators
             else:
+                if self.port_dead:
+                    return None  # Don't spam all terminators on a dead port
                 logger.warning(f"Cached terminator failed for motor {motor}, trying all terminators")
                 self._position_terminator_locked = False  # Reset to re-learn
         
@@ -231,6 +252,8 @@ class VXCController:
         response = None
         terminators = ['', '\r', '\r\n', '\n']
         for terminator in terminators:
+            if self.port_dead:
+                break  # Port died mid-loop — no point trying remaining terminators
             response = self.send_command(
                 position_commands[motor],
                 wait_for_response=True,

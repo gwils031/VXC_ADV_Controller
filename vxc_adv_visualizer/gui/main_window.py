@@ -25,7 +25,9 @@ from ..utils.serial_utils import list_available_ports
 from .auto_merge_tab import AutoMergeTab
 from .live_data_tab import LiveDataTab
 from .cross_section_tab import CrossSectionTab
+from .cross_section_view_tab import CrossSectionViewTab
 from ..data.vxc_position_logger import VXCPositionLogger
+from ..data.boundary_manager import BoundaryManager
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,7 @@ class VXCPositionWorker(QObject):
 
     position_updated = pyqtSignal(int, int)
     error = pyqtSignal(str)
+    fatal_error = pyqtSignal(str)  # Emitted when port is unrecoverable
 
     def __init__(self, controller: VXCController, interval_sec: float = 1.0):
         super().__init__()
@@ -104,6 +107,8 @@ class VXCPositionWorker(QObject):
         self.interval_sec = interval_sec
         self._running = False
         self._error_backoff_sec = 1.0
+        self._consecutive_errors = 0
+        self._max_consecutive_errors = 5
 
     def start(self):
         self._running = True
@@ -113,11 +118,22 @@ class VXCPositionWorker(QObject):
                 y = self.controller.get_position(motor=1)
                 if x is not None and y is not None:
                     self.position_updated.emit(x, y)
+                    self._consecutive_errors = 0
                 else:
+                    self._consecutive_errors += 1
                     self.error.emit("No position response")
+                    if self._consecutive_errors >= self._max_consecutive_errors or self.controller.port_dead:
+                        self.fatal_error.emit("Port unresponsive — disconnecting automatically")
+                        self._running = False
+                        break
                     time.sleep(self._error_backoff_sec)
             except Exception as e:
+                self._consecutive_errors += 1
                 self.error.emit(str(e))
+                if self._consecutive_errors >= self._max_consecutive_errors:
+                    self.fatal_error.emit(f"Too many errors: {e}")
+                    self._running = False
+                    break
                 time.sleep(self._error_backoff_sec)
             time.sleep(self.interval_sec)
 
@@ -534,6 +550,279 @@ class BoundaryFindWorker(QObject):
         return "Min" if self.direction < 0 else "Max"
 
 
+class WorkspaceCalibrateWorker(QObject):
+    """Background worker to calibrate all workspace boundaries (X/Y min/max)."""
+
+    progress = pyqtSignal(str)
+    completed = pyqtSignal(dict)  # Returns dict with x_min_steps, x_max_steps, y_min_steps, y_max_steps
+    failed = pyqtSignal(str)
+
+    def __init__(
+        self,
+        controller: VXCController,
+        step_size: int,
+        speed: int,
+        max_seconds: float,
+    ):
+        super().__init__()
+        self.controller = controller
+        self.step_size = step_size
+        self.speed = speed
+        self.max_seconds = max_seconds
+
+    def run(self):
+        """Find all four workspace boundaries in sequence and zero at minimums."""
+        try:
+            # Find X minimum (absolute position)
+            self.progress.emit("===== STARTING X-AXIS MINIMUM DETECTION =====")
+            x_min_raw = self._find_axis_limit(axis="X", direction=-1)
+            if x_min_raw is None:
+                self.failed.emit("Failed to find X-axis minimum")
+                return
+            self.progress.emit(f">>> X minimum found at: {x_min_raw} steps")
+            time.sleep(0.5)
+            
+            # Find X maximum (absolute position)
+            self.progress.emit("===== STARTING X-AXIS MAXIMUM DETECTION =====")
+            x_max_raw = self._find_axis_limit(axis="X", direction=1)
+            if x_max_raw is None:
+                self.failed.emit("Failed to find X-axis maximum")
+                return
+            self.progress.emit(f">>> X maximum found at: {x_max_raw} steps")
+            time.sleep(0.5)
+            
+            # Calculate X range
+            x_range = x_max_raw - x_min_raw
+            self.progress.emit(f">>> X-axis range calculated: {x_range} steps (from {x_min_raw} to {x_max_raw})")
+            
+            # Find Y minimum (absolute position)
+            self.progress.emit("===== STARTING Y-AXIS MINIMUM DETECTION =====")
+            y_min_raw = self._find_axis_limit(axis="Y", direction=-1)
+            if y_min_raw is None:
+                self.failed.emit("Failed to find Y-axis minimum")
+                return
+            self.progress.emit(f">>> Y minimum found at: {y_min_raw} steps")
+            time.sleep(0.5)
+            
+            # Find Y maximum (absolute position)
+            self.progress.emit("===== STARTING Y-AXIS MAXIMUM DETECTION =====")
+            y_max_raw = self._find_axis_limit(axis="Y", direction=1)
+            if y_max_raw is None:
+                self.failed.emit("Failed to find Y-axis maximum")
+                return
+            self.progress.emit(f">>> Y maximum found at: {y_max_raw} steps")
+            time.sleep(0.5)
+            
+            # Calculate ranges
+            x_range = abs(x_max_raw - x_min_raw)
+            y_range = abs(y_max_raw - y_min_raw)
+            self.progress.emit(f">>> Y-axis range calculated: {y_range} steps (from {y_min_raw} to {y_max_raw})")
+            self.progress.emit(f">>> Travel ranges: X={x_range} steps, Y={y_range} steps")
+
+            # Return to X minimum before zeroing so origin = physical min
+            self.progress.emit("===== RETURNING TO X MINIMUM =====")
+            x_return = self._find_axis_limit(axis="X", direction=-1)
+            if x_return is None:
+                self.failed.emit("Failed to return to X minimum")
+                return
+            self.progress.emit(f">>> Returned to X minimum at: {x_return} steps")
+            time.sleep(0.5)
+
+            # Return to Y minimum
+            self.progress.emit("===== RETURNING TO Y MINIMUM =====")
+            y_return = self._find_axis_limit(axis="Y", direction=-1)
+            if y_return is None:
+                self.failed.emit("Failed to return to Y minimum")
+                return
+            self.progress.emit(f">>> Returned to Y minimum at: {y_return} steps")
+            time.sleep(0.5)
+
+            # Zero position at the minimum (origin) so 0,0 = physical min
+            self.progress.emit("===== ZEROING POSITION AT MINIMUM (ORIGIN) =====")
+            self.controller.zero_position()
+            time.sleep(0.5)
+            
+            # Verify zeroing
+            x_verify = self.controller.get_position(motor=2)
+            y_verify = self.controller.get_position(motor=1)
+            self.progress.emit(f"Position after zeroing: X={x_verify}, Y={y_verify}")
+            
+            # Build results: origin = 0, max = full travel range
+            results = {
+                'x_min_steps': 0,
+                'x_max_steps': x_range,
+                'y_min_steps': 0,
+                'y_max_steps': y_range
+            }
+            
+            self.progress.emit(f"===== CALIBRATION COMPLETE =====")
+            self.progress.emit(f"Final boundaries: X=[0, {x_range}], Y=[0, {y_range}]")
+            self.completed.emit(results)
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            self.progress.emit(f"Exception occurred: {error_details}")
+            self.failed.emit(f"Workspace calibration error: {str(e)}")
+
+    def _find_axis_limit(self, axis: str, direction: int):
+        """Find a single axis limit. Returns position in steps or None on failure."""
+        motor = 2 if axis == "X" else 1
+        start_time = time.time()
+        iteration = 0
+        stall_count = 0
+        no_response_count = 0
+        original_timeout = self.controller.timeout
+        
+        # Set timeout long enough for single move + buffer
+        move_timeout = (abs(self.step_size) / max(self.speed, 1)) + 3.0
+        self.controller.timeout = max(move_timeout, 5.0)
+        
+        last_pos = self.controller.get_position(motor=motor)
+        if last_pos is None:
+            self.controller.timeout = original_timeout
+            return None
+
+        dir_label = "Min" if direction < 0 else "Max"
+        self.progress.emit(f"{axis} {dir_label}: starting at position {last_pos}")
+
+        while True:
+            iteration += 1
+            elapsed = time.time() - start_time
+            
+            # Check global timeout
+            if elapsed > self.max_seconds:
+                self.progress.emit(f"{axis} {dir_label}: TIMEOUT after {elapsed:.0f}s")
+                self.controller.timeout = original_timeout
+                return None
+
+            # Report progress
+            self.progress.emit(
+                f"{axis} {dir_label}: iteration {iteration}, pos={last_pos} ({elapsed:.0f}s)"
+            )
+
+            # Move motor and wait for completion
+            moved = self.controller.step_motor(
+                motor=motor,
+                steps=direction * self.step_size,
+                speed=self.speed,
+                acceleration=2,
+                wait=True,
+            )
+            
+            if not moved:
+                self.progress.emit(f"{axis} {dir_label}: Move command failed")
+                self.controller.timeout = original_timeout
+                return None
+
+            if self.controller.last_command_error:
+                self.progress.emit(f"{axis} {dir_label}: Command error: {self.controller.last_command_error}")
+                self.controller.timeout = original_timeout
+                return None
+
+            # Get current position AFTER the move
+            current_pos = None
+            for attempt in range(3):
+                current_pos = self.controller.get_position(motor=motor)
+                if current_pos is not None:
+                    break
+                time.sleep(0.2)
+                
+            if current_pos is None:
+                no_response_count += 1
+                self.progress.emit(f"{axis} {dir_label}: No position response (count: {no_response_count})")
+                if no_response_count >= 3:
+                    # Lost communication, return last known position
+                    self.progress.emit(f"{axis} {dir_label}: Lost communication at {last_pos}")
+                    self.controller.timeout = original_timeout
+                    return last_pos
+                continue
+
+            no_response_count = 0
+
+            # Check if we hit limit switch (fault status) AFTER getting position
+            status = self.controller.verify_status()
+            if status == "F":
+                # Hit physical stop! Return CURRENT position
+                self.progress.emit(f"{axis} {dir_label}: LIMIT SWITCH detected at position {current_pos}")
+                self.controller.timeout = original_timeout
+                return current_pos
+
+            # Check for mechanical stall (position not changing)
+            if current_pos == last_pos:
+                stall_count += 1
+                self.progress.emit(f"{axis} {dir_label}: Stall detected (count: {stall_count}, pos: {current_pos})")
+                
+                # If stalled for 3 consecutive moves, we've hit the limit
+                if stall_count >= 3:
+                    self.progress.emit(f"{axis} {dir_label}: MECHANICAL STALL confirmed at position {current_pos}")
+                    self.controller.timeout = original_timeout
+                    return current_pos
+            else:
+                stall_count = 0
+                self.progress.emit(f"{axis} {dir_label}: Moved from {last_pos} to {current_pos} (delta: {current_pos - last_pos})")
+
+            last_pos = current_pos
+
+    def _move_to_position(self, motor: int, target_position: int) -> bool:
+        """Move motor to a specific absolute position.
+        
+        Args:
+            motor: Motor number (1=Y, 2=X)
+            target_position: Target position in steps
+            
+        Returns:
+            True if move succeeded, False otherwise
+        """
+        axis_name = "X" if motor == 2 else "Y"
+        
+        # Get current position
+        current_pos = self.controller.get_position(motor=motor)
+        if current_pos is None:
+            self.progress.emit(f"ERROR: Cannot get current {axis_name} position")
+            return False
+        
+        # Calculate steps needed
+        steps_to_move = target_position - current_pos
+        
+        self.progress.emit(f"{axis_name}: Current={current_pos}, Target={target_position}, Delta={steps_to_move:+d}")
+        
+        if abs(steps_to_move) < 10:
+            # Already at target
+            self.progress.emit(f"{axis_name}: Already at target position (within 10 steps)")
+            return True
+        
+        # Move to target
+        self.progress.emit(f"Moving {axis_name}: {current_pos} → {target_position} ({steps_to_move:+d} steps)")
+        
+        success = self.controller.step_motor(
+            motor=motor,
+            steps=steps_to_move,
+            speed=self.speed,
+            acceleration=2,
+            wait=True
+        )
+        
+        if not success:
+            self.progress.emit(f"ERROR: step_motor() returned False for {axis_name}")
+            return False
+        
+        # Verify we reached the target
+        final_pos = self.controller.get_position(motor=motor)
+        if final_pos is None:
+            self.progress.emit(f"WARNING: Cannot verify final {axis_name} position")
+            return False  # Consider this a failure
+        
+        position_error = abs(final_pos - target_position)
+        self.progress.emit(f"{axis_name}: Final position={final_pos}, Error={position_error} steps")
+        
+        if position_error > 100:
+            self.progress.emit(f"WARNING: Large position error ({position_error} steps) for {axis_name}")
+            # Still return True if the move command succeeded, as the error might be acceptable
+        
+        return True
+
+
 class MainWindow(QMainWindow):
     """VXC Controller + Auto-Merge GUI for FlowTracker2 data integration."""
 
@@ -553,6 +842,13 @@ class MainWindow(QMainWindow):
         # Load configs
         self.vxc_config = self._load_config("vxc_config.yaml")
         self.experiment_config = self._load_config("experiment_config.yaml")
+        
+        # Initialize boundary manager
+        experiment_config_path = Path(self.config_dir) / "experiment_config.yaml"
+        if not experiment_config_path.exists():
+            experiment_config_path = Path(__file__).resolve().parents[1] / "config" / "experiment_config.yaml"
+        self.boundary_manager = BoundaryManager(experiment_config_path)
+        self.boundaries = self.boundary_manager.boundaries
         
         # Hardware
         self.vxc: Optional[VXCController] = None
@@ -629,19 +925,25 @@ class MainWindow(QMainWindow):
         self.auto_merge_tab = AutoMergeTab(vxc_logger=self.vxc_logger)
         self.tabs.addTab(self.auto_merge_tab, "Auto-Merge")
 
-        # Live Data tab
-        self.live_data_tab = LiveDataTab()
+        # Live Data tab (with boundaries)
+        self.live_data_tab = LiveDataTab(boundaries=self.boundaries)
         self.tabs.addTab(self.live_data_tab, "Live Data")
 
-        # Cross-Section Automation tab
+        # Cross-Section Automation tab (with boundaries)
         self.cross_section_tab = CrossSectionTab(
             vxc_controller=self.vxc,
-            vxc_logger=self.vxc_logger
+            vxc_logger=self.vxc_logger,
+            boundaries=self.boundaries
         )
         self.tabs.addTab(self.cross_section_tab, "Cross-Section")
 
-        # Auto-update Live Data from averaged output
+        # Cross-Section View tab (velocity visualization with session import)
+        self.cross_section_view_tab = CrossSectionViewTab(boundaries=self.boundaries)
+        self.tabs.addTab(self.cross_section_view_tab, "Cross-Section View")
+
+        # Auto-update Live Data and Cross-Section View from averaged output
         self.auto_merge_tab.averaged_file_ready.connect(self.live_data_tab.update_from_avg_file)
+        self.auto_merge_tab.averaged_file_ready.connect(self.cross_section_view_tab.update_from_avg_file)
         
         main_layout.addWidget(self.tabs)
         central_widget.setLayout(main_layout)
@@ -769,12 +1071,13 @@ class MainWindow(QMainWindow):
         info_label.setStyleSheet("color: #6c757d; font-size: 10pt; padding: 5px; background: #f8f9fa; border-radius: 3px;")
         jog_to_layout.addWidget(info_label)
         
-        # Plane dimensions (from measurement area)
+        # Plane dimensions (from boundary manager)
         # Origin (0,0) is at bottom-LEFT
-        # X axis: from 0 to 165654 (~1.0519 m wide, positive rightward)
-        # Y axis: from 0 to 57651 (~0.3661 m tall, positive upward)
-        self.plane_x_max_distance = 165654  # maximum distance from origin
-        self.plane_y_max_distance = 57651
+        # X axis: positive rightward
+        # Y axis: positive upward
+        # Note: boundaries loaded from experiment_config.yaml or defaults (165654, 57651)
+        self.plane_x_max_distance = self.boundaries['x_max_steps']
+        self.plane_y_max_distance = self.boundaries['y_max_steps']
         
         # X position slider (absolute position across flume)
         x_slider_layout = QVBoxLayout()
@@ -858,31 +1161,41 @@ class MainWindow(QMainWindow):
         jog_to_group.setLayout(jog_to_layout)
         layout.addWidget(jog_to_group)
 
-        # Boundary capture
-        boundary_group = QGroupBox("Origin Calibration")
+        # Workspace Calibration
+        boundary_group = QGroupBox("Workspace Calibration")
         boundary_layout = QVBoxLayout()
 
-        self.find_origin_btn = QPushButton("Find Origin (0,0)")
-        self.find_origin_btn.setStyleSheet(
-            "QPushButton { background-color: #007bff; color: white; font-weight: bold; "
+        # Display current workspace bounds
+        self.workspace_bounds_label = QLabel(self._format_workspace_bounds())
+        self.workspace_bounds_label.setStyleSheet("color: #555; font-weight: bold; padding: 5px; background: #f0f0f0; border-radius: 3px;")
+        boundary_layout.addWidget(self.workspace_bounds_label)
+
+        # Calibrate workspace button
+        self.calibrate_workspace_btn = QPushButton("⚙ Calibrate Workspace Bounds")
+        self.calibrate_workspace_btn.setStyleSheet(
+            "QPushButton { background-color: #ff8c00; color: white; font-weight: bold; "
             "font-size: 12px; padding: 10px; } "
-            "QPushButton:hover { background-color: #0056b3; }"
+            "QPushButton:hover { background-color: #ff6f00; } "
+            "QPushButton:disabled { background-color: #cccccc; color: #666666; }"
         )
-        self.find_origin_btn.setMinimumHeight(50)
+        self.calibrate_workspace_btn.setMinimumHeight(50)
+        self.calibrate_workspace_btn.clicked.connect(self._start_workspace_calibration)
+        boundary_layout.addWidget(self.calibrate_workspace_btn)
+
+        # Legacy origin finding (kept for compatibility)
+        self.find_origin_btn = QPushButton("Find Origin (0,0) Only")
+        self.find_origin_btn.setStyleSheet(
+            "QPushButton { background-color: #6c757d; color: white; font-weight: bold; "
+            "font-size: 10px; padding: 8px; } "
+            "QPushButton:hover { background-color: #5a6268; }"
+        )
+        self.find_origin_btn.setMinimumHeight(40)
         self.find_origin_btn.clicked.connect(self._start_find_origin)
         boundary_layout.addWidget(self.find_origin_btn)
 
         self.boundary_status_label = QLabel("Status: Idle")
         self.boundary_status_label.setStyleSheet("color: #555; font-weight: bold;")
         boundary_layout.addWidget(self.boundary_status_label)
-
-        self.boundary_values_label = QLabel(self._format_boundary_values())
-        self.boundary_values_label.setStyleSheet("color: #555;")
-        boundary_layout.addWidget(self.boundary_values_label)
-
-        self.boundary_save_btn = QPushButton("Save Origin Position")
-        self.boundary_save_btn.clicked.connect(self._save_boundaries)
-        boundary_layout.addWidget(self.boundary_save_btn)
 
         boundary_group.setLayout(boundary_layout)
         layout.addWidget(boundary_group)
@@ -1072,6 +1385,7 @@ class MainWindow(QMainWindow):
         self.vxc_poll_thread.started.connect(self.vxc_poll_worker.start)
         self.vxc_poll_worker.position_updated.connect(self._apply_vxc_position)
         self.vxc_poll_worker.error.connect(self._on_vxc_position_error)
+        self.vxc_poll_worker.fatal_error.connect(self._on_vxc_fatal_error)
         self.vxc_poll_thread.start()
 
     def _stop_vxc_polling(self):
@@ -1195,6 +1509,20 @@ class MainWindow(QMainWindow):
     def _on_vxc_position_error(self, message: str):
         logger.warning(f"VXC position polling error: {message}")
 
+    def _on_vxc_fatal_error(self, message: str):
+        """Port is unrecoverable — auto-disconnect and notify the user."""
+        logger.error(f"VXC fatal error, auto-disconnecting: {message}")
+        self._disconnect_vxc()
+        self.vxc_status_label.setText("Disconnected (port error)")
+        self.vxc_status_label.setStyleSheet("color: red; font-weight: bold;")
+        QMessageBox.critical(
+            self,
+            "VXC Connection Lost",
+            f"The VXC port became unresponsive and was disconnected automatically.\n\n"
+            f"Detail: {message}\n\n"
+            "Check the USB cable and click \"Auto Detect VXC\" to reconnect."
+        )
+
     def _start_find_origin(self):
         """Start automated origin (0,0) finding process."""
         if self.vxc is None:
@@ -1281,7 +1609,6 @@ class MainWindow(QMainWindow):
             meters = self._steps_to_meters(steps)
             self.boundary_limits[key] = meters
         
-        self.boundary_values_label.setText(self._format_boundary_values())
         self.boundary_status_label.setText("Status: Origin (0,0) captured successfully!")
         self._set_boundary_ui_enabled(True)
         QMessageBox.information(self, "Origin Found", 
@@ -1301,7 +1628,6 @@ class MainWindow(QMainWindow):
         meters = self._steps_to_meters(steps)
         key = f"{axis.lower()}_{label.lower()}_m"
         self.boundary_limits[key] = meters
-        self.boundary_values_label.setText(self._format_boundary_values())
         self.boundary_status_label.setText(f"Status: {axis} {label} captured")
         self._set_boundary_ui_enabled(True)
 
@@ -1310,13 +1636,122 @@ class MainWindow(QMainWindow):
         self._set_boundary_ui_enabled(True)
         QMessageBox.critical(self, "Boundary Error", message)
 
+    def _start_workspace_calibration(self):
+        """Start full workspace calibration (all 4 boundaries)."""
+        if self.vxc is None:
+            QMessageBox.warning(self, "Not Connected", "Connect to VXC before calibrating workspace.")
+            return
+
+        prompt = (
+            "Calibrate Workspace Boundaries?\n\n"
+            "This will move both axes to all physical limits (min and max).\n"
+            "The process will take several minutes.\n\n"
+            "⚠ Ensure the workspace is clear and safe for automatic movement."
+        )
+        reply = QMessageBox.question(self, "Calibrate Workspace", prompt, 
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        if self.boundary_thread:
+            return
+
+        self._set_boundary_ui_enabled(False)
+        self.boundary_status_label.setText("Status: Calibrating workspace...")
+
+        self.boundary_thread = QThread()
+        self.boundary_worker = WorkspaceCalibrateWorker(
+            controller=self.vxc,
+            step_size=self.boundary_step_size,
+            speed=self.boundary_speed,
+            max_seconds=self.boundary_max_seconds,
+        )
+        self.boundary_worker.moveToThread(self.boundary_thread)
+        self.boundary_thread.started.connect(self.boundary_worker.run)
+        self.boundary_worker.progress.connect(self._on_workspace_calibrate_progress)
+        self.boundary_worker.completed.connect(self._on_workspace_calibrate_completed)
+        self.boundary_worker.failed.connect(self._on_workspace_calibrate_failed)
+        self.boundary_worker.completed.connect(self.boundary_thread.quit)
+        self.boundary_worker.failed.connect(self.boundary_thread.quit)
+        self.boundary_thread.finished.connect(self._cleanup_boundary_worker)
+        self.boundary_thread.start()
+
+    def _on_workspace_calibrate_progress(self, message: str):
+        self.boundary_status_label.setText(f"Status: {message}")
+
+    def _on_workspace_calibrate_completed(self, boundaries: dict):
+        """Handle completion of workspace calibration."""
+        # Save boundaries using BoundaryManager
+        if self.boundary_manager.save_boundaries(boundaries):
+            # Update internal boundaries dict
+            self.boundaries = boundaries
+            self.boundary_manager.update_boundaries(boundaries)
+            
+            # Update UI elements that depend on boundaries
+            self.plane_x_max_distance = boundaries['x_max_steps']
+            self.plane_y_max_distance = boundaries['y_max_steps']
+            
+            # Update sliders
+            self.x_slider.setMaximum(self.plane_x_max_distance)
+            self.y_slider.setMaximum(self.plane_y_max_distance)
+            
+            # Update boundary display
+            self.workspace_bounds_label.setText(self._format_workspace_bounds())
+            self.boundary_status_label.setText("Status: Workspace calibrated successfully!")
+            
+            # Notify tabs of boundary update
+            self._emit_boundary_update()
+            
+            x_min_m, x_max_m, y_min_m, y_max_m = self.boundary_manager.get_all_ranges_m()
+            QMessageBox.information(
+                self, "Calibration Complete", 
+                f"Workspace boundaries calibrated:\n\n"
+                f"X: {x_min_m:.4f} m to {x_max_m:.4f} m\n"
+                f"Y: {y_min_m:.4f} m to {y_max_m:.4f} m\n\n"
+                f"Saved to experiment_config.yaml"
+            )
+        else:
+            QMessageBox.warning(
+                self, "Save Failed",
+                "Workspace calibrated but failed to save to config file."
+            )
+        
+        self._set_boundary_ui_enabled(True)
+
+    def _on_workspace_calibrate_failed(self, message: str):
+        self.boundary_status_label.setText("Status: Calibration failed")
+        self._set_boundary_ui_enabled(True)
+        QMessageBox.critical(self, "Calibration Error", message)
+
+    def _emit_boundary_update(self):
+        """Notify tabs that boundaries have been updated."""
+        # Update Live Data tab
+        if hasattr(self, 'live_data_tab'):
+            self.live_data_tab.update_boundaries(self.boundaries)
+        
+        # Update Cross-Section tab
+        if hasattr(self, 'cross_section_tab'):
+            self.cross_section_tab.update_boundaries(self.boundaries)
+
+        # Update Cross-Section View tab
+        if hasattr(self, 'cross_section_view_tab'):
+            self.cross_section_view_tab.update_boundaries(self.boundaries)
+
+    def _format_workspace_bounds(self) -> str:
+        """Format workspace bounds for display."""
+        x_min_m, x_max_m, y_min_m, y_max_m = self.boundary_manager.get_all_ranges_m()
+        return (
+            f"X: {x_min_m:.3f} – {x_max_m:.3f} m  |  "
+            f"Y: {y_min_m:.3f} – {y_max_m:.3f} m"
+        )
+
     def _cleanup_boundary_worker(self):
         self.boundary_worker = None
         self.boundary_thread = None
 
     def _set_boundary_ui_enabled(self, enabled: bool):
         self.find_origin_btn.setEnabled(enabled)
-        self.boundary_save_btn.setEnabled(enabled)
+        self.calibrate_workspace_btn.setEnabled(enabled)
 
     def _format_boundary_values(self) -> str:
         x_min = self.boundary_limits.get("x_min_m")

@@ -279,13 +279,23 @@ class CrossSectionTab(QWidget):
     # Hardware constants
     STEPS_PER_INCH = 4000.0
     METERS_PER_FOOT = 0.3048
-    X_MAX_STEPS = 165654  # Motor 2 (~1.0519 m)
-    Y_MAX_STEPS = 57651   # Motor 1 (~0.3661 m)
     
-    def __init__(self, vxc_controller, vxc_logger=None):
+    def __init__(self, vxc_controller, vxc_logger=None, boundaries: dict = None):
         super().__init__()
         self.vxc = vxc_controller
         self.vxc_logger = vxc_logger
+        
+        # Set boundaries (use defaults if not provided)
+        if boundaries is None:
+            boundaries = {
+                'x_min_steps': 0,
+                'x_max_steps': 165654,
+                'y_min_steps': 0,
+                'y_max_steps': 57651
+            }
+        self.boundaries = boundaries
+        self.X_MAX_STEPS = boundaries['x_max_steps']
+        self.Y_MAX_STEPS = boundaries['y_max_steps']
         
         self.worker = None
         self.worker_thread = None
@@ -1096,11 +1106,48 @@ class CrossSectionTab(QWidget):
     
     def _validate_bounds(self, x_steps: int, y_steps: int) -> bool:
         """Validate that position is within workspace bounds."""
-        if x_steps < 0 or x_steps > self.X_MAX_STEPS:
+        if x_steps < self.boundaries['x_min_steps'] or x_steps > self.boundaries['x_max_steps']:
             return False
-        if y_steps < 0 or y_steps > self.Y_MAX_STEPS:
+        if y_steps < self.boundaries['y_min_steps'] or y_steps > self.boundaries['y_max_steps']:
             return False
         return True
+
+    def update_boundaries(self, boundaries: dict):
+        """Update workspace boundaries and reconfigure UI.
+        
+        Args:
+            boundaries: Dict with x_min_steps, x_max_steps, y_min_steps, y_max_steps
+        """
+        self.boundaries = boundaries
+        self.X_MAX_STEPS = boundaries['x_max_steps']
+        self.Y_MAX_STEPS = boundaries['y_max_steps']
+        
+        # Update UI elements with new boundaries
+        x_max_m = self._steps_to_meters(self.X_MAX_STEPS)
+        y_max_m = self._steps_to_meters(self.Y_MAX_STEPS)
+        
+        # Update workspace info label
+        if hasattr(self, 'workspace_label'):
+            info_text = f"Workspace: X: 0 to {x_max_m:.4f} m, Y: 0 to {y_max_m:.4f} m"
+            self.workspace_label.setText(info_text)
+        
+        # Update range sliders
+        if hasattr(self, 'x_range_slider'):
+            self.x_range_slider.setRange(0.0, x_max_m)
+            self.x_range_slider.setValues(0.0, x_max_m)
+        
+        if hasattr(self, 'y_range_slider'):
+            self.y_range_slider.setRange(0.0, y_max_m)
+            self.y_range_slider.setValues(0.0, y_max_m)
+        
+        # Update fixed position spinboxes
+        if hasattr(self, 'x_fixed_spin'):
+            self.x_fixed_spin.setRange(0.0, x_max_m)
+            self.x_fixed_spin.setValue(min(self.x_fixed_spin.value(), x_max_m))
+        
+        if hasattr(self, 'y_fixed_spin'):
+            self.y_fixed_spin.setRange(0.0, y_max_m)
+            self.y_fixed_spin.setValue(min(self.y_fixed_spin.value(), y_max_m))
     
     def _update_y_range_label(self, low: float, high: float):
         """Update Y range label when slider changes."""

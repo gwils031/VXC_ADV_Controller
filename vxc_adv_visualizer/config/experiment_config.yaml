@@ -5,6 +5,15 @@ grid:
   y_spacing_feet: 0.05
 max_sampling_duration_sec: 20.0
 
+# Workspace boundaries (motor steps)
+# These are calibrated using the "Calibrate Workspace Bounds" feature
+# Default values match historical hard-coded limits
+boundaries:
+  x_min_steps: 0
+  x_max_steps: 165654  # ~1.052 m
+  y_min_steps: 0
+  y_max_steps: 57651   # ~0.366 m
+
 # Environmental calibration
 environment:
   # Atmospheric pressure at measurement site in dbar

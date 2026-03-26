@@ -280,9 +280,6 @@ class AutoMergeTab(QWidget):
         self._log_activity("Auto-merge system initialized", "info")
         self._log_activity(f"Watch directory: {self.watch_dir}", "info")
 
-        # Auto-start monitoring with defaults
-        QTimer.singleShot(0, lambda: self.enable_checkbox.setChecked(True))
-
         # Ensure configured folders exist
         self._ensure_paths()
 
@@ -401,9 +398,16 @@ class AutoMergeTab(QWidget):
         if self.session_manager is None:
             self.session_manager = SessionManager(output_dir)
         
-        # Auto-start a session if none is active
+        # Require an active session before monitoring can start
         if not self.session_manager.is_active():
-            self._auto_start_session()
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "No Active Session",
+                "Please fill in the session details and click \"Start Session\" before enabling monitoring."
+            )
+            self.enable_checkbox.setChecked(False)
+            return
         else:
             # Session already active — update UI to reflect this
             session_id = self.session_manager.active_session
@@ -741,6 +745,10 @@ class AutoMergeTab(QWidget):
             self.save_notes_btn.setEnabled(True)
             
             self._log_activity(f"✓ Session started: {session_id}", "success")
+
+            # Auto-start monitoring now that a session is active
+            if not self.enable_checkbox.isChecked():
+                self.enable_checkbox.setChecked(True)
             
         except RuntimeError as e:
             from PyQt5.QtWidgets import QMessageBox
@@ -829,29 +837,40 @@ class AutoMergeTab(QWidget):
             
             # Create table
             table = QTableWidget()
-            table.setColumnCount(9)
+            table.setColumnCount(13)
             table.setHorizontalHeaderLabels([
-                "Session ID", "Name", "Date", "Operator", "Type", 
-                "Points", "Duration (min)", "Match Rate %", "Notes"
+                "Session ID", "Name", "Date", "Start Time", "Operator", "Type",
+                "Points", "Valid", "Quality (E/G/F/P)", "Duration (min)",
+                "Match Rate %", "Total Samples", "Notes",
             ])
             table.horizontalHeader().setStretchLastSection(True)
-            
+
             # Load sessions from index
             with open(index_file, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 sessions = list(reader)
-                
+
                 table.setRowCount(len(sessions))
                 for i, session in enumerate(sessions):
+                    quality_str = (
+                        f"E:{session.get('excellent_points', '')} "
+                        f"G:{session.get('good_points', '')} "
+                        f"F:{session.get('fair_points', '')} "
+                        f"P:{session.get('poor_points', '')}"
+                    )
                     table.setItem(i, 0, QTableWidgetItem(session.get('session_id', '')))
                     table.setItem(i, 1, QTableWidgetItem(session.get('session_name', '')))
                     table.setItem(i, 2, QTableWidgetItem(session.get('date', '')))
-                    table.setItem(i, 3, QTableWidgetItem(session.get('operator', '')))
-                    table.setItem(i, 4, QTableWidgetItem(session.get('scan_type', '')))
-                    table.setItem(i, 5, QTableWidgetItem(session.get('point_count', '')))
-                    table.setItem(i, 6, QTableWidgetItem(session.get('duration_min', '')))
-                    table.setItem(i, 7, QTableWidgetItem(session.get('match_rate', '')))
-                    table.setItem(i, 8, QTableWidgetItem(session.get('notes', '')))
+                    table.setItem(i, 3, QTableWidgetItem(session.get('start_time', '')))
+                    table.setItem(i, 4, QTableWidgetItem(session.get('operator', '')))
+                    table.setItem(i, 5, QTableWidgetItem(session.get('scan_type', '')))
+                    table.setItem(i, 6, QTableWidgetItem(session.get('point_count', '')))
+                    table.setItem(i, 7, QTableWidgetItem(session.get('valid_measurements', '')))
+                    table.setItem(i, 8, QTableWidgetItem(quality_str))
+                    table.setItem(i, 9, QTableWidgetItem(session.get('duration_min', '')))
+                    table.setItem(i, 10, QTableWidgetItem(session.get('match_rate', '')))
+                    table.setItem(i, 11, QTableWidgetItem(session.get('total_samples', '')))
+                    table.setItem(i, 12, QTableWidgetItem(session.get('notes', '')))
             
             table.resizeColumnsToContents()
             layout.addWidget(table)
@@ -860,7 +879,7 @@ class AutoMergeTab(QWidget):
             btn_layout = QHBoxLayout()
             
             open_folder_btn = QPushButton("Open Session Folder")
-            open_folder_btn.clicked.connect(lambda: self._open_session_folder(table, sessions_dir))
+            open_folder_btn.clicked.connect(lambda: self._open_session_folder(table, sessions))
             btn_layout.addWidget(open_folder_btn)
             
             btn_layout.addStretch()
@@ -878,20 +897,23 @@ class AutoMergeTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to load sessions: {e}")
             self._log_activity(f"✗ Failed to browse sessions: {e}", "error")
     
-    def _open_session_folder(self, table, sessions_dir):
+    def _open_session_folder(self, table, sessions):
         """Open the selected session folder in file explorer."""
         current_row = table.currentRow()
         if current_row < 0:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.information(self, "No Selection", "Please select a session first.")
             return
-        
-        session_id = table.item(current_row, 0).text()
-        session_path = sessions_dir / session_id
-        
-        if session_path.exists():
+
+        from pathlib import Path
+        session = sessions[current_row]
+        output_path = session.get('output_path', '').strip()
+        session_path = Path(output_path) if output_path else None
+
+        if session_path and session_path.exists():
             import subprocess
             subprocess.Popen(f'explorer "{session_path}"')
         else:
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Not Found", f"Session folder not found:\n{session_path}")
+            QMessageBox.warning(self, "Not Found",
+                                f"Session folder not found:\n{output_path or '(no path recorded)'}")
