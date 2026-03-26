@@ -9,10 +9,23 @@ without requiring Python, pip, or any packages to be installed.
 
 1. **Double-click `build.bat`** from the workspace root (or run it in a terminal).
 2. Wait ~3–5 minutes for PyInstaller to finish.
-3. Find the output in `dist\VXC_ADV_Visualizer\`.
+3. Find outputs in:
+   - `dist\VXC_ADV_Visualizer\` (distributable folder)
+   - `dist\VXC_ADV_Visualizer_v<version>.zip` (release upload artifact)
 
 That's it. The batch script handles PyInstaller installation, cleaning old
-builds, bundling, and seeding the writable config directory.
+builds, bundling, seeding the writable config directory, and creating a
+versioned release ZIP.
+
+### Current version source
+
+`build.bat` controls the release ZIP name via:
+
+```bat
+set VERSION=1.0.0
+```
+
+The generated ZIP is `dist\VXC_ADV_Visualizer_v%VERSION%.zip`.
 
 ---
 
@@ -46,6 +59,9 @@ pyinstaller build_exe.spec
 ```
 
 Run from the workspace root (`C:\App Development\ADV&VXC Controller\`).
+
+If you use this manual command instead of `build.bat`, remember it does **not**
+create the final release ZIP automatically.
 
 ---
 
@@ -105,8 +121,11 @@ just the `.exe` — it will not run without `_internal\`.
 ### Packaging options
 
 **ZIP (recommended)**
-1. Right-click `dist\VXC_ADV_Visualizer` → "Send to" → "Compressed (zipped) folder".
-2. Share the `.zip`.
+1. Use the ZIP created by `build.bat`: `dist\VXC_ADV_Visualizer_v<version>.zip`.
+2. Upload that file directly to GitHub Releases.
+
+If ZIP creation fails due a transient file lock, run `build.bat` again after
+closing any running `VXC_ADV_Visualizer.exe` process.
 
 **Installer (optional)**
 - [Inno Setup](https://jrsoftware.org/isinfo.php) (free)
@@ -229,4 +248,4 @@ PySide6 (LGPL). All other dependencies use permissive licenses (MIT/BSD).
 
 ## Last Updated
 
-March 4, 2026
+March 26, 2026
