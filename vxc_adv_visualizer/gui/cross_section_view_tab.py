@@ -22,10 +22,10 @@ import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib import cm
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+from matplotlib.colors import Normalize, LinearSegmentedColormap, TwoSlopeNorm
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QSizePolicy, QFileDialog,
+    QFrame, QSizePolicy, QFileDialog, QComboBox,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -52,6 +52,7 @@ class CrossSectionViewTab(QWidget):
         self.last_avg_file: Optional[str] = None
         self.colorbar = None
         self._cached_rows: List[dict] = []
+        self.plot_mode = "velocity"
         self._setup_ui()
 
     # ─── UI Setup ────────────────────────────────────────────────────────────
@@ -83,6 +84,29 @@ class CrossSectionViewTab(QWidget):
         self.points_label = QLabel("Points: 0")
         self.points_label.setStyleSheet("color: #495057; font-weight: 500;")
         info_layout.addWidget(self.points_label)
+
+        info_layout.addSpacing(20)
+
+        mode_label = QLabel("Color Mode:")
+        mode_label.setStyleSheet("color: #495057; font-weight: 500;")
+        info_layout.addWidget(mode_label)
+
+        self.plot_mode_combo = QComboBox()
+        self.plot_mode_combo.addItem("Velocity |V|", "velocity")
+        self.plot_mode_combo.addItem("TKE", "tke")
+        self.plot_mode_combo.addItem("Reynolds tau_xz", "tau_xz")
+        self.plot_mode_combo.setCurrentIndex(0)
+        self.plot_mode_combo.setStyleSheet("""
+            QComboBox {
+                background-color: white;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 4px 8px;
+                min-width: 150px;
+            }
+        """)
+        self.plot_mode_combo.currentIndexChanged.connect(self._on_plot_mode_changed)
+        info_layout.addWidget(self.plot_mode_combo)
 
         info_layout.addStretch()
 
@@ -260,7 +284,7 @@ class CrossSectionViewTab(QWidget):
 
         # Plot legend (static reference box)
         stats_layout.addWidget(_section("Plot Legend"))
-        legend_label = QLabel(
+        self.legend_label = QLabel(
             "Arrows = (Vy, Vz) direction\n"
             "  length ∝ in-plane speed\n"
             "  (Vx-only → collapses to dot)\n\n"
@@ -269,7 +293,7 @@ class CrossSectionViewTab(QWidget):
             "  Blue   = low magnitude\n"
             "  (turbo colormap)"
         )
-        legend_label.setStyleSheet("""
+        self.legend_label.setStyleSheet("""
             QLabel {
                 color: #495057;
                 font-size: 9pt;
@@ -280,7 +304,7 @@ class CrossSectionViewTab(QWidget):
                 border-radius: 3px;
             }
         """)
-        stats_layout.addWidget(legend_label)
+        stats_layout.addWidget(self.legend_label)
 
         self.status_label = QLabel("● Click a point to inspect")
         self.status_label.setStyleSheet("color: #6c757d; font-size: 9pt; padding-top: 4px;")
@@ -349,6 +373,14 @@ class CrossSectionViewTab(QWidget):
         self.file_label.setText(f"File: {avg_path.name}")
         self.points_label.setText(f"Points: {len(rows)}")
         self._plot_cross_section(rows)
+
+    def _on_plot_mode_changed(self):
+        """Switch colormap source between velocity magnitude and turbulence fields."""
+        selected = self.plot_mode_combo.currentData()
+        self.plot_mode = selected if selected else "velocity"
+        self._update_plot_legend()
+        if self._cached_rows:
+            self._plot_cross_section(self._cached_rows)
 
     def _load_avg_rows(self, filepath: Path) -> List[dict]:
         """Read averaged CSV, group by (x_m, y_m), aggregate multiple measurements."""
@@ -421,6 +453,7 @@ class CrossSectionViewTab(QWidget):
     def _plot_cross_section(self, rows: List[dict]):
         """Render equal-length quiver arrows (Vy, Vz direction) coloured by total |V|."""
         x_vals, y_vals, vx_vals, vy_vals, vz_vals = [], [], [], [], []
+        tke_vals, tau_vals = [], []
         vx_key = "Corrected Velocity.X (m/s)"
         vy_key = "Corrected Velocity.Y (m/s)"
         vz_key = "Corrected Velocity.Z (m/s)"
@@ -438,6 +471,8 @@ class CrossSectionViewTab(QWidget):
             vx_vals.append(vx)
             vy_vals.append(vy)
             vz_vals.append(vz)
+            tke_vals.append(self._parse_float(row.get('TKE (m2/s2)')))
+            tau_vals.append(self._parse_float(row.get('Reynolds tau_xz (Pa)')))
 
         if not x_vals:
             self._draw_placeholder("Missing velocity columns or no valid data")
@@ -452,14 +487,57 @@ class CrossSectionViewTab(QWidget):
         total_mag = np.sqrt(vx_arr**2 + vy_arr**2 + vz_arr**2)
         in_plane_mag = np.sqrt(vy_arr**2 + vz_arr**2)
 
+        tke_arr = np.array([np.nan if v is None else float(v) for v in tke_vals], dtype=float)
+        tau_arr = np.array([np.nan if v is None else float(v) for v in tau_vals], dtype=float)
+
         # Use raw (Vy, Vz) — arrow length reflects in-plane speed.
         # Points where in-plane flow ≈ 0 (Vx-only) render as zero-length arrows (dots).
 
+        color_values = total_mag
+        colorbar_label = "Total Speed |V| (m/s)"
         norm = self._build_normalizer(total_mag)
+
+        mode = self.plot_mode
+        if mode == "tke":
+            valid_tke = ~np.isnan(tke_arr)
+            if np.any(valid_tke):
+                color_values = np.where(valid_tke, tke_arr, np.nanmin(tke_arr))
+                norm = self._build_normalizer(tke_arr[valid_tke])
+                colorbar_label = "TKE (m2/s2)"
+            else:
+                logger.info("Cross-section view: no valid TKE values, falling back to velocity colors")
+                self.plot_mode = "velocity"
+                self.plot_mode_combo.blockSignals(True)
+                self.plot_mode_combo.setCurrentIndex(0)
+                self.plot_mode_combo.blockSignals(False)
+                mode = "velocity"
+        elif mode == "tau_xz":
+            valid_tau = ~np.isnan(tau_arr)
+            if np.any(valid_tau):
+                tau_valid = tau_arr[valid_tau]
+                tau_max_abs = float(np.max(np.abs(tau_valid)))
+                tau_max_abs = tau_max_abs if tau_max_abs > 1e-12 else 1e-12
+                color_values = np.where(valid_tau, tau_arr, 0.0)
+                norm = TwoSlopeNorm(vmin=-tau_max_abs, vcenter=0.0, vmax=tau_max_abs)
+                colorbar_label = "Reynolds tau_xz (Pa)"
+            else:
+                logger.info("Cross-section view: no valid tau_xz values, falling back to velocity colors")
+                self.plot_mode = "velocity"
+                self.plot_mode_combo.blockSignals(True)
+                self.plot_mode_combo.setCurrentIndex(0)
+                self.plot_mode_combo.blockSignals(False)
+                mode = "velocity"
+
+            self.plot_mode = mode
+            self._update_plot_legend()
+
         # Clip turbo to start at ~30% (light cyan) so the dark navy/purple
         # low-end colors are removed — all arrows remain legible on dark bg
         _turbo_colors = cm.get_cmap('turbo')(np.linspace(0.30, 0.92, 256))
-        cmap = LinearSegmentedColormap.from_list('turbo_clipped', _turbo_colors)
+        if mode == "tau_xz":
+            cmap = cm.get_cmap('RdBu_r')
+        else:
+            cmap = LinearSegmentedColormap.from_list('turbo_clipped', _turbo_colors)
 
         self.ax.clear()
 
@@ -493,7 +571,7 @@ class CrossSectionViewTab(QWidget):
         # ── Quiver: arrows with remapped lengths, coloured by total |V| ──────
         quiv = self.ax.quiver(
             x_arr, y_arr, vy_plot, vz_plot,
-            total_mag,
+            color_values,
             cmap=cmap,
             norm=norm,
             angles='xy',
@@ -511,7 +589,7 @@ class CrossSectionViewTab(QWidget):
         if np.any(near_zero):
             self.ax.scatter(
                 x_arr[near_zero], y_arr[near_zero],
-                c=total_mag[near_zero], cmap=cmap, norm=norm,
+                c=color_values[near_zero], cmap=cmap, norm=norm,
                 s=55, edgecolors='white', linewidths=0.5,
                 zorder=4,
             )
@@ -526,7 +604,12 @@ class CrossSectionViewTab(QWidget):
         self.ax.set_ylim(ylim)
         self.ax.set_xlabel("Cross-Stream Position (m)", fontsize=10, fontweight='bold', color=_FG)
         self.ax.set_ylabel("Vertical Position / Depth (m)", fontsize=10, fontweight='bold', color=_FG)
-        self.ax.set_title("Flow Cross-Section (Downstream View)", fontsize=11, fontweight='bold',
+        mode_title = {
+            "velocity": "Velocity Magnitude Colors",
+            "tke": "TKE Colors",
+            "tau_xz": "Reynolds tau_xz Colors",
+        }.get(mode, "Velocity Magnitude Colors")
+        self.ax.set_title(f"Flow Cross-Section (Downstream View) - {mode_title}", fontsize=11, fontweight='bold',
                           pad=10, color=_FG)
         self.ax.tick_params(colors=_FG)
         for spine in self.ax.spines.values():
@@ -539,7 +622,7 @@ class CrossSectionViewTab(QWidget):
                 self.colorbar.remove()
             except (AttributeError, ValueError):
                 pass
-        self.colorbar = self.figure.colorbar(quiv, ax=self.ax, label="Total Speed |V| (m/s)", pad=0.02)
+        self.colorbar = self.figure.colorbar(quiv, ax=self.ax, label=colorbar_label, pad=0.02)
         self.colorbar.ax.yaxis.label.set_color(_FG)
         self.colorbar.ax.tick_params(colors=_FG, labelsize=9)
         self.colorbar.outline.set_edgecolor(_FG)
@@ -562,6 +645,20 @@ class CrossSectionViewTab(QWidget):
             bbox=dict(boxstyle='round,pad=0.5', facecolor='white', edgecolor='#dee2e6', alpha=0.9),
         )
         self.canvas.draw_idle()
+
+    def _update_plot_legend(self):
+        """Refresh legend text to reflect active color mode."""
+        mode_text = {
+            "velocity": "Color  = Total speed |V|\n  Red    = high magnitude\n  Blue   = low magnitude\n  (turbo colormap)",
+            "tke": "Color  = TKE\n  Red    = high turbulence energy\n  Blue   = low turbulence energy\n  (turbo colormap)",
+            "tau_xz": "Color  = Reynolds tau_xz\n  Red    = positive stress\n  Blue   = negative stress\n  (RdBu diverging colormap)",
+        }.get(self.plot_mode, "Color  = Total speed |V|")
+        self.legend_label.setText(
+            "Arrows = (Vy, Vz) direction\n"
+            "  length ∝ in-plane speed\n"
+            "  (Vx-only → collapses to dot)\n\n"
+            f"{mode_text}"
+        )
 
     # ─── Interaction ─────────────────────────────────────────────────────────
 
