@@ -23,6 +23,8 @@ ADV_FILENAME_PATTERN = re.compile(r'^(\d{8})-(\d{6})\.csv$')
 class MergeWorkerThread(QThread):
     """Background thread to parse, merge, and write ADV/VXC outputs."""
 
+    POSITION_SEGMENT_TOLERANCE_M = 0.005
+
     completed = pyqtSignal(str, dict)
     failed = pyqtSignal(str)
 
@@ -33,6 +35,218 @@ class MergeWorkerThread(QThread):
         self.output_dir = output_dir
         self.tolerance_sec = tolerance_sec
         self.session_manager = session_manager
+
+    @staticmethod
+    def _get_sample_timestamp(sample: Dict) -> Optional[str]:
+        return sample.get('UTC time') or sample.get('timestamp_utc')
+
+    def _segment_matched_samples(self, merger: ADVVXCMerger, matched_samples: List[Dict]) -> List[List[Dict]]:
+        """Split matched samples into contiguous position segments using 5 mm threshold."""
+        if not matched_samples:
+            return []
+
+        segments: List[List[Dict]] = [[matched_samples[0]]]
+        prev_x = merger._parse_float(matched_samples[0].get('x_m'))
+        prev_y = merger._parse_float(matched_samples[0].get('y_m'))
+
+        for sample in matched_samples[1:]:
+            x = merger._parse_float(sample.get('x_m'))
+            y = merger._parse_float(sample.get('y_m'))
+
+            should_split = False
+            if None in (prev_x, prev_y, x, y):
+                should_split = True
+            else:
+                should_split = (
+                    abs(x - prev_x) > self.POSITION_SEGMENT_TOLERANCE_M
+                    or abs(y - prev_y) > self.POSITION_SEGMENT_TOLERANCE_M
+                )
+
+            if should_split:
+                segments.append([sample])
+            else:
+                segments[-1].append(sample)
+
+            prev_x, prev_y = x, y
+
+        return segments
+
+    def _build_segment_average(
+        self,
+        merger: ADVVXCMerger,
+        segment_samples: List[Dict],
+        source_adv_file: str,
+        segment_index: int,
+        segment_count: int,
+    ) -> Dict:
+        """Compute averaged and turbulence outputs for one position segment."""
+        avg_data_dict: Dict = {}
+        if not segment_samples:
+            return avg_data_dict
+
+        first = segment_samples[0]
+        last = segment_samples[-1]
+
+        avg_data_dict['source_adv_file'] = source_adv_file
+        avg_data_dict['segment_index'] = segment_index
+        avg_data_dict['segment_count'] = segment_count
+        avg_data_dict['segment_start_utc'] = self._get_sample_timestamp(first)
+        avg_data_dict['segment_end_utc'] = self._get_sample_timestamp(last)
+        avg_data_dict['segment_sample_count'] = len(segment_samples)
+        avg_data_dict['x_m'] = first.get('x_m')
+        avg_data_dict['y_m'] = first.get('y_m')
+        avg_data_dict['segment_anchor_x_m'] = first.get('x_m')
+        avg_data_dict['segment_anchor_y_m'] = first.get('y_m')
+        avg_data_dict['timestamp_utc'] = self._get_sample_timestamp(first)
+        avg_data_dict['sample_count'] = len(segment_samples)
+
+        def _safe_floats(samples, key):
+            result = []
+            for s in samples:
+                v = merger._parse_float(s.get(key))
+                if v is not None:
+                    result.append(v)
+            return result
+
+        for key in [
+            'Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
+            'Corrected Velocity.X (m/s)', 'Corrected Velocity.Y (m/s)', 'Corrected Velocity.Z (m/s)'
+        ]:
+            values = _safe_floats(segment_samples, key)
+            if values:
+                avg_data_dict[key] = sum(values) / len(values)
+
+        corr_values, snr_values = [], []
+        for s in segment_samples:
+            for i in range(1, 4):
+                c = merger._parse_float(s.get(f'Correlation Score.Beam{i} (%)'))
+                n = merger._parse_float(s.get(f'SNR.Beam{i} (dB)'))
+                if c is not None:
+                    corr_values.append(c)
+                if n is not None:
+                    snr_values.append(n)
+        if corr_values:
+            avg_data_dict['Correlation.Avg (%)'] = sum(corr_values) / len(corr_values)
+        if snr_values:
+            avg_data_dict['SNR.Avg (dB)'] = sum(snr_values) / len(snr_values)
+
+        env_field_map = {
+            'Temperature (°C)': 'Temperature (C)',
+            'Raw Pressure (dbar)': 'Raw Pressure (dbar)',
+            'Voltage (V)': 'Voltage (V)',
+        }
+        for adv_key, session_key in env_field_map.items():
+            values = _safe_floats(segment_samples, adv_key)
+            if values:
+                avg_data_dict[session_key] = sum(values) / len(values)
+
+        if 'Raw Pressure (dbar)' in avg_data_dict:
+            atm = merger._load_atmospheric_pressure()
+            avg_data_dict['Gauge Pressure (dbar)'] = float(avg_data_dict['Raw Pressure (dbar)']) - atm
+
+        ux_vals = _safe_floats(segment_samples, 'Corrected Velocity.X (m/s)')
+        uy_vals = _safe_floats(segment_samples, 'Corrected Velocity.Y (m/s)')
+        uz_vals = _safe_floats(segment_samples, 'Corrected Velocity.Z (m/s)')
+
+        ux_mean = (sum(ux_vals) / len(ux_vals)) if ux_vals else None
+        uy_mean = (sum(uy_vals) / len(uy_vals)) if uy_vals else None
+        uz_mean = (sum(uz_vals) / len(uz_vals)) if uz_vals else None
+
+        ux2_terms: List[float] = []
+        uy2_terms: List[float] = []
+        uz2_terms: List[float] = []
+        uxuz_terms: List[float] = []
+
+        for s in segment_samples:
+            ux = merger._parse_float(s.get('Corrected Velocity.X (m/s)'))
+            uy = merger._parse_float(s.get('Corrected Velocity.Y (m/s)'))
+            uz = merger._parse_float(s.get('Corrected Velocity.Z (m/s)'))
+
+            if ux is not None and ux_mean is not None:
+                upx = ux - ux_mean
+                s['u_prime_x (m/s)'] = upx
+                s['u_prime_x2 (m2/s2)'] = upx * upx
+                ux2_terms.append(upx * upx)
+
+            if uy is not None and uy_mean is not None:
+                upy = uy - uy_mean
+                s['u_prime_y (m/s)'] = upy
+                s['u_prime_y2 (m2/s2)'] = upy * upy
+                uy2_terms.append(upy * upy)
+
+            if uz is not None and uz_mean is not None:
+                upz = uz - uz_mean
+                s['u_prime_z (m/s)'] = upz
+                s['u_prime_z2 (m2/s2)'] = upz * upz
+                uz2_terms.append(upz * upz)
+
+            if ux is not None and ux_mean is not None and uz is not None and uz_mean is not None:
+                upx_upz = (ux - ux_mean) * (uz - uz_mean)
+                s['u_prime_x_u_prime_z (m2/s2)'] = upx_upz
+                uxuz_terms.append(upx_upz)
+
+        var_x = (sum(ux2_terms) / len(ux2_terms)) if ux2_terms else None
+        var_y = (sum(uy2_terms) / len(uy2_terms)) if uy2_terms else None
+        var_z = (sum(uz2_terms) / len(uz2_terms)) if uz2_terms else None
+
+        if var_x is not None:
+            avg_data_dict['TI_x (m/s)'] = math.sqrt(var_x)
+        if var_y is not None:
+            avg_data_dict['TI_y (m/s)'] = math.sqrt(var_y)
+        if var_z is not None:
+            avg_data_dict['TI_z (m/s)'] = math.sqrt(var_z)
+
+        if var_x is not None and var_y is not None and var_z is not None:
+            avg_data_dict['TKE (m2/s2)'] = 0.5 * (var_x + var_y + var_z)
+
+        cov_ux_uz = (sum(uxuz_terms) / len(uxuz_terms)) if uxuz_terms else None
+        if cov_ux_uz is not None:
+            avg_data_dict['u_prime_x_u_prime_z_cov (m2/s2)'] = cov_ux_uz
+
+        temp_c = merger._parse_float(avg_data_dict.get('Temperature (C)'))
+        if cov_ux_uz is not None and temp_c is not None:
+            rho = (
+                999.842594
+                + 6.793952e-2 * temp_c
+                - 9.09529e-3 * (temp_c ** 2)
+                + 1.001685e-4 * (temp_c ** 3)
+                - 1.120083e-6 * (temp_c ** 4)
+                + 6.536332e-9 * (temp_c ** 5)
+            )
+            avg_data_dict['rho_freshwater (kg/m3)'] = rho
+            avg_data_dict['Reynolds tau_xz (Pa)'] = -rho * cov_ux_uz
+
+        return avg_data_dict
+
+    @staticmethod
+    def _is_position_usable_for_segmentation(sample: Dict) -> bool:
+        """Return True only when VXC quality explicitly marks stationary/usable position."""
+        return str(sample.get('vxc_quality', '')).strip().upper() == 'GOOD'
+
+    @staticmethod
+    def _sample_beam_average(merger: ADVVXCMerger, sample: Dict, prefix: str) -> Optional[float]:
+        values: List[float] = []
+        for i in range(1, 4):
+            val = merger._parse_float(sample.get(prefix.format(i)))
+            if val is not None:
+                values.append(val)
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def _sample_passes_filter_gates(
+        self,
+        merger: ADVVXCMerger,
+        sample: Dict,
+        min_corr_avg_pct: float,
+        min_snr_avg_db: float,
+    ) -> bool:
+        """Apply per-sample correlation/SNR thresholds before filtered averaging."""
+        corr_avg = self._sample_beam_average(merger, sample, 'Correlation Score.Beam{} (%)')
+        snr_avg = self._sample_beam_average(merger, sample, 'SNR.Beam{} (dB)')
+        if corr_avg is None or snr_avg is None:
+            return False
+        return corr_avg >= min_corr_avg_pct and snr_avg >= min_snr_avg_db
 
     def run(self):
         """Execute merge operation in background thread.
@@ -63,8 +277,13 @@ class MergeWorkerThread(QThread):
             logger.debug(f"[WORKER] Building session data for {filename}")
             all_merged = merger.merged_data
 
-            # Matched-only samples (VXC position was found)
-            matched_samples = [s for s in all_merged if s.get('vxc_quality') != 'MISSING']
+            # Segmentation uses stationary/valid VXC position only.
+            matched_samples = [
+                s for s in all_merged if self._is_position_usable_for_segmentation(s)
+            ]
+
+            min_corr_gate = float(self.session_manager.session_config.min_correlation_avg_pct or 0.0)
+            min_snr_gate = float(self.session_manager.session_config.min_snr_avg_db or 0.0)
 
             # Remap merger key names → session schema key names so the raw
             # DictWriter (which expects x_m / y_m / time_delta_ms / timestamp_utc)
@@ -76,145 +295,84 @@ class MergeWorkerThread(QThread):
                 s['time_delta_ms'] = s.get('vxc_time_delta_ms')
                 s['timestamp_utc'] = s.get('UTC time') or s.get('timestamp_utc')
 
-            # Build averaged dict from matched samples only
-            avg_data_dict = {}
-            if matched_samples:
-                # Position and timestamp from first matched sample
-                first = matched_samples[0]
-                avg_data_dict['x_m'] = first.get('vxc_x_m')
-                avg_data_dict['y_m'] = first.get('vxc_y_m')
-                avg_data_dict['timestamp_utc'] = first.get('UTC time') or first.get('timestamp_utc')
-                avg_data_dict['sample_count'] = len(matched_samples)
+            segments = self._segment_matched_samples(merger, matched_samples)
 
-                # Helper: safe float parse (handles empty strings / non-numeric from ADV CSV)
-                def _safe_floats(samples, key):
-                    result = []
-                    for s in samples:
-                        v = merger._parse_float(s.get(key))
-                        if v is not None:
-                            result.append(v)
-                    return result
-
-                # Average velocity components
-                for key in ['Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
-                            'Corrected Velocity.X (m/s)', 'Corrected Velocity.Y (m/s)', 'Corrected Velocity.Z (m/s)']:
-                    values = _safe_floats(matched_samples, key)
-                    if values:
-                        avg_data_dict[key] = sum(values) / len(values)
-
-                # Average correlation and SNR across all three beams
-                corr_values, snr_values = [], []
-                for s in matched_samples:
-                    for i in range(1, 4):
-                        c = merger._parse_float(s.get(f'Correlation Score.Beam{i} (%)'))
-                        n = merger._parse_float(s.get(f'SNR.Beam{i} (dB)'))
-                        if c is not None:
-                            corr_values.append(c)
-                        if n is not None:
-                            snr_values.append(n)
-                if corr_values:
-                    avg_data_dict['Correlation.Avg (%)'] = sum(corr_values) / len(corr_values)
-                if snr_values:
-                    avg_data_dict['SNR.Avg (dB)'] = sum(snr_values) / len(snr_values)
-
-                # Average environmental columns (map ADV header → session schema key)
-                env_field_map = {
-                    'Temperature (°C)': 'Temperature (C)',
-                    'Raw Pressure (dbar)': 'Raw Pressure (dbar)',
-                    'Voltage (V)': 'Voltage (V)',
-                }
-                for adv_key, session_key in env_field_map.items():
-                    values = _safe_floats(matched_samples, adv_key)
-                    if values:
-                        avg_data_dict[session_key] = sum(values) / len(values)
-
-                # Gauge pressure = raw pressure − local atmospheric pressure
-                if 'Raw Pressure (dbar)' in avg_data_dict:
-                    atm = merger._load_atmospheric_pressure()
-                    avg_data_dict['Gauge Pressure (dbar)'] = float(avg_data_dict['Raw Pressure (dbar)']) - atm
-
-                # Turbulence metrics from corrected velocity fluctuations.
-                ux_vals = _safe_floats(matched_samples, 'Corrected Velocity.X (m/s)')
-                uy_vals = _safe_floats(matched_samples, 'Corrected Velocity.Y (m/s)')
-                uz_vals = _safe_floats(matched_samples, 'Corrected Velocity.Z (m/s)')
-
-                ux_mean = (sum(ux_vals) / len(ux_vals)) if ux_vals else None
-                uy_mean = (sum(uy_vals) / len(uy_vals)) if uy_vals else None
-                uz_mean = (sum(uz_vals) / len(uz_vals)) if uz_vals else None
-
-                ux2_terms: List[float] = []
-                uy2_terms: List[float] = []
-                uz2_terms: List[float] = []
-                uxuz_terms: List[float] = []
-
-                for s in matched_samples:
-                    ux = merger._parse_float(s.get('Corrected Velocity.X (m/s)'))
-                    uy = merger._parse_float(s.get('Corrected Velocity.Y (m/s)'))
-                    uz = merger._parse_float(s.get('Corrected Velocity.Z (m/s)'))
-
-                    if ux is not None and ux_mean is not None:
-                        upx = ux - ux_mean
-                        s['u_prime_x (m/s)'] = upx
-                        s['u_prime_x2 (m2/s2)'] = upx * upx
-                        ux2_terms.append(upx * upx)
-
-                    if uy is not None and uy_mean is not None:
-                        upy = uy - uy_mean
-                        s['u_prime_y (m/s)'] = upy
-                        s['u_prime_y2 (m2/s2)'] = upy * upy
-                        uy2_terms.append(upy * upy)
-
-                    if uz is not None and uz_mean is not None:
-                        upz = uz - uz_mean
-                        s['u_prime_z (m/s)'] = upz
-                        s['u_prime_z2 (m2/s2)'] = upz * upz
-                        uz2_terms.append(upz * upz)
-
-                    if ux is not None and ux_mean is not None and uz is not None and uz_mean is not None:
-                        upx_upz = (ux - ux_mean) * (uz - uz_mean)
-                        s['u_prime_x_u_prime_z (m2/s2)'] = upx_upz
-                        uxuz_terms.append(upx_upz)
-
-                var_x = (sum(ux2_terms) / len(ux2_terms)) if ux2_terms else None
-                var_y = (sum(uy2_terms) / len(uy2_terms)) if uy2_terms else None
-                var_z = (sum(uz2_terms) / len(uz2_terms)) if uz2_terms else None
-
-                if var_x is not None:
-                    avg_data_dict['TI_x (m/s)'] = math.sqrt(var_x)
-                if var_y is not None:
-                    avg_data_dict['TI_y (m/s)'] = math.sqrt(var_y)
-                if var_z is not None:
-                    avg_data_dict['TI_z (m/s)'] = math.sqrt(var_z)
-
-                if var_x is not None and var_y is not None and var_z is not None:
-                    avg_data_dict['TKE (m2/s2)'] = 0.5 * (var_x + var_y + var_z)
-
-                cov_ux_uz = (sum(uxuz_terms) / len(uxuz_terms)) if uxuz_terms else None
-                if cov_ux_uz is not None:
-                    avg_data_dict['u_prime_x_u_prime_z_cov (m2/s2)'] = cov_ux_uz
-
-                # Freshwater density from temperature-only polynomial (kg/m^3), 0-40 C range.
-                temp_c = merger._parse_float(avg_data_dict.get('Temperature (C)'))
-                if cov_ux_uz is not None and temp_c is not None:
-                    rho = (
-                        999.842594
-                        + 6.793952e-2 * temp_c
-                        - 9.09529e-3 * (temp_c ** 2)
-                        + 1.001685e-4 * (temp_c ** 3)
-                        - 1.120083e-6 * (temp_c ** 4)
-                        + 6.536332e-9 * (temp_c ** 5)
-                    )
-                    avg_data_dict['rho_freshwater (kg/m3)'] = rho
-                    avg_data_dict['Reynolds tau_xz (Pa)'] = -rho * cov_ux_uz
-
-            # Mark validity so session statistics can count valid measurements
-            avg_data_dict['status'] = 'OK' if matched_samples else 'INVALID'
-
-            # Append matched samples + averaged summary to the session master files
+            # Append per-segment raw + averaged summaries to session files.
             try:
-                seq = self.session_manager.append_measurement(matched_samples, avg_data_dict)
-                stats['session_measurement_seq'] = seq
-                logger.info(f"[WORKER] Appended measurement {seq} to session ({len(matched_samples)} matched samples)")
+                session_seqs: List[int] = []
+                filtered_segments_written = 0
+                filtered_samples_total = 0
+                if segments:
+                    for segment_index, segment_samples in enumerate(segments, start=1):
+                        for sample in segment_samples:
+                            sample['source_adv_file'] = filename
+                            sample['segment_index'] = segment_index
+
+                        avg_data_dict = self._build_segment_average(
+                            merger,
+                            segment_samples,
+                            filename,
+                            segment_index,
+                            len(segments),
+                        )
+                        avg_data_dict['status'] = 'OK'
+
+                        filtered_segment_samples = [
+                            s for s in segment_samples
+                            if self._sample_passes_filter_gates(
+                                merger,
+                                s,
+                                min_corr_gate,
+                                min_snr_gate,
+                            )
+                        ]
+
+                        avg_data_dict['filter_pass_sample_count'] = len(filtered_segment_samples)
+                        avg_data_dict['filter_source_sample_count'] = len(segment_samples)
+
+                        filtered_avg_data_dict: Optional[Dict] = None
+                        if filtered_segment_samples:
+                            filtered_avg_data_dict = self._build_segment_average(
+                                merger,
+                                [dict(s) for s in filtered_segment_samples],
+                                filename,
+                                segment_index,
+                                len(segments),
+                            )
+                            filtered_avg_data_dict['status'] = 'OK'
+                            filtered_avg_data_dict['filter_pass_sample_count'] = len(filtered_segment_samples)
+                            filtered_avg_data_dict['filter_source_sample_count'] = len(segment_samples)
+                            filtered_segments_written += 1
+                            filtered_samples_total += len(filtered_segment_samples)
+
+                        seq = self.session_manager.append_measurement(
+                            segment_samples,
+                            avg_data_dict,
+                            filtered_avg_data_dict,
+                        )
+                        session_seqs.append(seq)
+                else:
+                    empty_avg = {
+                        'source_adv_file': filename,
+                        'segment_index': 0,
+                        'segment_count': 0,
+                        'segment_sample_count': 0,
+                        'status': 'INVALID',
+                    }
+                    seq = self.session_manager.append_measurement([], empty_avg, None)
+                    session_seqs.append(seq)
+
+                stats['session_measurement_seq_start'] = session_seqs[0]
+                stats['session_measurement_seq_end'] = session_seqs[-1]
+                stats['session_measurement_count'] = len(session_seqs)
+                stats['segment_count'] = len(segments)
+                stats['filtered_segments_written'] = filtered_segments_written
+                stats['filtered_samples_total'] = filtered_samples_total
+                logger.info(
+                    f"[WORKER] Appended {len(session_seqs)} segment measurements "
+                    f"for {filename} ({len(matched_samples)} usable samples, "
+                    f"{filtered_segments_written} filtered segments)"
+                )
             except Exception as e:
                 logger.error(f"[WORKER] Failed to append to session: {e}")
                 self.failed.emit(f"{filename}: session write error — {e}")

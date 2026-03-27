@@ -8,7 +8,7 @@ from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, 
     QPushButton, QTextEdit, QCheckBox, QFileDialog, QLineEdit,
-    QGridLayout
+    QGridLayout, QToolButton
 )
 from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal, QTimer, QSettings
 from PyQt5.QtGui import QFont, QTextCursor
@@ -42,21 +42,61 @@ class AutoMergeTab(QWidget):
         # Settings
         self.settings = QSettings("ADV-VXC", "VXC-ADV-Controller")
 
-        # Default directories (user requested)
-        default_watch = "C:/App Development/ADV&VXC Controller/ADV_Data"
-        default_vxc = "C:/App Development/ADV&VXC Controller/VXC_Positions"
-        default_output = "C:/App Development/ADV&VXC Controller/Data_Output"
+        # First-run bootstrap: create a user-local default folder structure.
+        default_watch, default_vxc, default_output, bootstrapped = self._bootstrap_default_structure()
 
         # Load persisted directories if available
         self.watch_dir = self.settings.value("auto_merge/watch_dir", default_watch)
         self.vxc_dir = self.settings.value("auto_merge/vxc_dir", default_vxc)
         self.output_dir = self.settings.value("auto_merge/output_dir", default_output)
+        self.min_correlation_gate = float(self.settings.value("auto_merge/min_correlation_gate", 0.0))
+        self.min_snr_gate = float(self.settings.value("auto_merge/min_snr_gate", 0.0))
+        self._bootstrapped_default_dirs = bootstrapped
         
         # Statistics
         self.total_processed = 0
         self.total_failed = 0
         
         self._setup_ui()
+
+    def _bootstrap_default_structure(self):
+        """Create a sane default folder structure on first run and return default paths."""
+        from PyQt5.QtCore import QStandardPaths
+
+        documents_dir = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        base_dir = Path(documents_dir) if documents_dir else Path.home()
+        app_root = base_dir / "VXC_ADV_Controller"
+
+        default_watch = app_root / "ADV_Data"
+        default_vxc = app_root / "VXC_Positions"
+        default_output = app_root / "Data_Output"
+
+        initialized = bool(self.settings.value("auto_merge/initialized", False, type=bool))
+        if not initialized:
+            existing_watch = self.settings.value("auto_merge/watch_dir", "")
+            existing_vxc = self.settings.value("auto_merge/vxc_dir", "")
+            existing_output = self.settings.value("auto_merge/output_dir", "")
+
+            target_watch = Path(str(existing_watch)) if existing_watch else default_watch
+            target_vxc = Path(str(existing_vxc)) if existing_vxc else default_vxc
+            target_output = Path(str(existing_output)) if existing_output else default_output
+
+            # Base folders users need to run without manual setup.
+            for p in (
+                target_watch,
+                target_vxc,
+                target_output,
+                target_output / "sessions",
+            ):
+                p.mkdir(parents=True, exist_ok=True)
+
+            self.settings.setValue("auto_merge/watch_dir", str(target_watch))
+            self.settings.setValue("auto_merge/vxc_dir", str(target_vxc))
+            self.settings.setValue("auto_merge/output_dir", str(target_output))
+            self.settings.setValue("auto_merge/initialized", True)
+            return str(target_watch), str(target_vxc), str(target_output), True
+
+        return str(default_watch), str(default_vxc), str(default_output), False
     
     def _setup_ui(self):
         """Setup user interface."""
@@ -65,21 +105,37 @@ class AutoMergeTab(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         
         # === Quick Start ===
-        quick_group = QGroupBox("Quick Start")
+        quick_group = QGroupBox("Workflow")
         quick_layout = QVBoxLayout()
         quick_text = QLabel(
-            "1) Select the FlowTracker2 export folder\n"
-            "2) Enable monitoring to auto-merge new exports\n"
-            "3) Merged and averaged files appear in the Output folder"
+            "1) Start a session and verify operator/notes\n"
+            "2) Enable monitoring to auto-merge new ADV exports\n"
+            "3) Watch status and activity feed during collection"
         )
         quick_text.setWordWrap(True)
-        quick_text.setStyleSheet("color: #444;")
+        quick_text.setStyleSheet(
+            "color: #37474f; background: #eef3f6; border: 1px solid #d7e2e8; "
+            "border-radius: 4px; padding: 8px;"
+        )
         quick_layout.addWidget(quick_text)
         quick_group.setLayout(quick_layout)
         layout.addWidget(quick_group)
 
-        # === Session Management Section ===
-        session_group = QGroupBox("Session Management")
+        # === Session Management Section (collapsible) ===
+        session_toggle_row = QHBoxLayout()
+        self.session_toggle_btn = QToolButton()
+        self.session_toggle_btn.setCheckable(True)
+        self.session_toggle_btn.setChecked(True)
+        self.session_toggle_btn.setArrowType(Qt.DownArrow)
+        self.session_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.session_toggle_btn.setText("Hide Session Run Control")
+        self.session_toggle_btn.setStyleSheet("font-weight: bold;")
+        self.session_toggle_btn.toggled.connect(self._toggle_session_run_control)
+        session_toggle_row.addWidget(self.session_toggle_btn)
+        session_toggle_row.addStretch()
+        layout.addLayout(session_toggle_row)
+
+        self.session_group = QGroupBox("1) Session & Run Control")
         session_layout = QGridLayout()
         session_layout.setSpacing(8)
         
@@ -96,129 +152,164 @@ class AutoMergeTab(QWidget):
         self.new_session_btn.setStyleSheet("background-color: #28a745; color: white; font-weight: bold;")
         session_layout.addWidget(self.new_session_btn, 0, 3)
         
-        # End Session button (new)
-        self.end_session_btn = QPushButton("End Session")
-        self.end_session_btn.clicked.connect(self._end_current_session)
-        self.end_session_btn.setStyleSheet("background-color: #dc3545; color: white; font-weight: bold;")
-        self.end_session_btn.setEnabled(False)  # Disabled until session starts
-        session_layout.addWidget(self.end_session_btn, 0, 4)
-        
         # Browse sessions button (moved to row 1)
         self.browse_sessions_btn = QPushButton("Browse...")
         self.browse_sessions_btn.clicked.connect(self._browse_sessions)
         self.browse_sessions_btn.setMaximumWidth(100)
-        session_layout.addWidget(self.browse_sessions_btn, 0, 5)
+        session_layout.addWidget(self.browse_sessions_btn, 0, 4)
         
-        # Operator and notes
+        # Operator
         session_layout.addWidget(QLabel("Operator:"), 1, 0)
         self.operator_edit = QLineEdit()
         self.operator_edit.setPlaceholderText("Your name")
-        session_layout.addWidget(self.operator_edit, 1, 1)
-        
-        session_layout.addWidget(QLabel("Notes:"), 1, 2)
-        self.notes_edit = QLineEdit()
-        self.notes_edit.setPlaceholderText("Brief description of experiment")
-        session_layout.addWidget(self.notes_edit, 1, 3)
-        
-        self.save_notes_btn = QPushButton("Save Notes")
-        self.save_notes_btn.clicked.connect(self._save_notes)
-        self.save_notes_btn.setMaximumWidth(100)
-        self.save_notes_btn.setEnabled(False)  # Disabled until session is active
-        session_layout.addWidget(self.save_notes_btn, 1, 4, 1, 2)  # Span 2 columns
+        session_layout.addWidget(self.operator_edit, 1, 1, 1, 2)
+
+        # Per-session threshold gates for filtered averages output
+        session_layout.addWidget(QLabel("Min Correlation Avg (%):"), 2, 0)
+        from PyQt5.QtWidgets import QDoubleSpinBox
+        self.min_corr_spin = QDoubleSpinBox()
+        self.min_corr_spin.setRange(0.0, 100.0)
+        self.min_corr_spin.setSingleStep(1.0)
+        self.min_corr_spin.setDecimals(1)
+        self.min_corr_spin.setValue(self.min_correlation_gate)
+        self.min_corr_spin.setSuffix(" %")
+        session_layout.addWidget(self.min_corr_spin, 2, 1)
+
+        session_layout.addWidget(QLabel("Min SNR Avg (dB):"), 2, 2)
+        self.min_snr_spin = QDoubleSpinBox()
+        self.min_snr_spin.setRange(0.0, 60.0)
+        self.min_snr_spin.setSingleStep(0.5)
+        self.min_snr_spin.setDecimals(1)
+        self.min_snr_spin.setValue(self.min_snr_gate)
+        self.min_snr_spin.setSuffix(" dB")
+        session_layout.addWidget(self.min_snr_spin, 2, 3)
         
         # Session status with indicator
-        session_layout.addWidget(QLabel("Session Status:"), 2, 0)
+        session_layout.addWidget(QLabel("Session Status:"), 3, 0)
         self.session_status_label = QLabel("⚪ NO SESSION")
         self.session_status_label.setStyleSheet("color: #888; font-weight: bold;")
-        session_layout.addWidget(self.session_status_label, 2, 1, 1, 5)  # Span all columns
-        
-        session_group.setLayout(session_layout)
-        layout.addWidget(session_group)
+        session_layout.addWidget(self.session_status_label, 3, 1, 1, 5)  # Span all columns
 
-        # === Monitoring Status Section ===
-        status_group = QGroupBox("Status")
-        status_layout = QGridLayout()
-        status_layout.setSpacing(8)
-        
-        # Status indicator
-        status_layout.addWidget(QLabel("Status:"), 0, 0)
-        self.status_indicator = QLabel("● Inactive")
-        self.status_indicator.setStyleSheet("color: gray; font-weight: bold; font-size: 11pt;")
-        status_layout.addWidget(self.status_indicator, 0, 1)
-        
-        # Watch directory
-        status_layout.addWidget(QLabel("ADV Export Folder:"), 1, 0)
-        self.watch_dir_label = QLabel(self.watch_dir)
-        self.watch_dir_label.setStyleSheet("color: #555;")
-        status_layout.addWidget(self.watch_dir_label, 1, 1, 1, 2)
-        
-        browse_btn = QPushButton("Browse...")
-        browse_btn.setMaximumWidth(100)
-        browse_btn.clicked.connect(self._browse_watch_directory)
-        status_layout.addWidget(browse_btn, 1, 3)
-        status_layout.addWidget(
-            self._make_hint_label("Folder where FlowTracker2 exports ADV CSV files"),
-            1,
-            4,
-        )
-        
-        # Statistics
-        status_layout.addWidget(QLabel("Files Processed:"), 2, 0)
-        self.processed_label = QLabel("0")
-        self.processed_label.setStyleSheet("font-weight: bold;")
-        status_layout.addWidget(self.processed_label, 2, 1)
-        
-        status_layout.addWidget(QLabel("Failed:"), 2, 2)
-        self.failed_label = QLabel("0")
-        self.failed_label.setStyleSheet("font-weight: bold; color: red;")
-        status_layout.addWidget(self.failed_label, 2, 3)
-        
-        # Last merge info
-        status_layout.addWidget(QLabel("Last Merge:"), 3, 0)
-        self.last_merge_label = QLabel("(none)")
-        self.last_merge_label.setStyleSheet("color: #555; font-style: italic;")
-        status_layout.addWidget(self.last_merge_label, 3, 1, 1, 3)
-        
-        status_group.setLayout(status_layout)
-        layout.addWidget(status_group)
-        
-        # === Controls Section ===
-        controls_group = QGroupBox("Auto-Merge Control")
-        controls_layout = QHBoxLayout()
-        
-        self.enable_checkbox = QCheckBox("Monitor and Auto-Merge")
+        # Monitoring toggle lives with session lifecycle for clearer operation flow.
+        session_layout.addWidget(QLabel("Monitoring:"), 4, 0)
+        self.enable_checkbox = QCheckBox("Start Monitoring & Auto-Merge")
         self.enable_checkbox.setStyleSheet("font-weight: bold;")
         self.enable_checkbox.stateChanged.connect(self._on_enable_changed)
-        controls_layout.addWidget(self.enable_checkbox)
-        controls_layout.addWidget(
-            self._make_hint_label("Watches the export folder and merges new files automatically")
+        session_layout.addWidget(self.enable_checkbox, 4, 1, 1, 2)
+        session_layout.addWidget(
+            self._make_hint_label("Watches the ADV export folder and auto-merges new files"),
+            4,
+            3,
         )
         
-        controls_layout.addSpacing(20)
-        
-        # VXC logging is always auto-started when monitoring is enabled.
-        
-        controls_layout.addStretch()
-        
-        self.clear_log_btn = QPushButton("Clear Activity Log")
-        self.clear_log_btn.clicked.connect(self._clear_activity_log)
-        controls_layout.addWidget(self.clear_log_btn)
-        
-        controls_group.setLayout(controls_layout)
-        layout.addWidget(controls_group)
-        
+        self.session_group.setLayout(session_layout)
+        self.session_group.setVisible(True)
+        layout.addWidget(self.session_group)
+
+        # Persistent end-session control remains visible even when run control is collapsed.
+        end_session_row = QHBoxLayout()
+        end_session_row.addStretch()
+        self.end_session_btn = QPushButton("END SESSION")
+        self.end_session_btn.clicked.connect(self._end_current_session)
+        self.end_session_btn.setStyleSheet(
+            "QPushButton { background-color: #c62828; color: white; font-weight: bold; "
+            "font-size: 11pt; padding: 8px 18px; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #b71c1c; }"
+            "QPushButton:disabled { background-color: #b0bec5; color: #eceff1; }"
+        )
+        self.end_session_btn.setMinimumHeight(44)
+        self.end_session_btn.setEnabled(False)  # Disabled until session starts
+        end_session_row.addWidget(self.end_session_btn)
+        layout.addLayout(end_session_row)
+
+        # === Session Notes Section ===
+        notes_group = QGroupBox("Session Notes (Editable During Run)")
+        notes_layout = QVBoxLayout()
+
+        notes_header = QHBoxLayout()
+        notes_hint = QLabel("Notes remain editable during an active session.")
+        notes_hint.setStyleSheet("color: #546e7a; font-size: 9pt;")
+        notes_header.addWidget(notes_hint)
+        notes_header.addStretch()
+
+        self.save_notes_btn = QPushButton("Save Notes")
+        self.save_notes_btn.clicked.connect(self._save_notes)
+        self.save_notes_btn.setMaximumWidth(120)
+        self.save_notes_btn.setEnabled(False)  # Disabled until session is active
+        notes_header.addWidget(self.save_notes_btn)
+        notes_layout.addLayout(notes_header)
+
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setPlaceholderText("Enter session notes, experiment context, or observations...")
+        self.notes_edit.setMinimumHeight(110)
+        self.notes_edit.setStyleSheet(
+            "QTextEdit { background-color: #f8fafc; border: 1px solid #dfe7ee; border-radius: 4px; }"
+        )
+        notes_layout.addWidget(self.notes_edit)
+
+        notes_group.setLayout(notes_layout)
+        layout.addWidget(notes_group)
+
         # === Activity Log Section ===
-        log_group = QGroupBox("Activity")
+        log_group = QGroupBox("2) Activity Feed")
         log_layout = QVBoxLayout()
+
+        # Moved from old Monitoring Status panel for at-a-glance visibility.
+        activity_status = QGridLayout()
+        activity_status.setHorizontalSpacing(12)
+        activity_status.setVerticalSpacing(6)
+
+        activity_status.addWidget(QLabel("Status:"), 0, 0)
+        self.status_indicator = QLabel("● Inactive")
+        self.status_indicator.setStyleSheet("color: gray; font-weight: bold; font-size: 11pt;")
+        activity_status.addWidget(self.status_indicator, 0, 1)
+
+        activity_status.addWidget(QLabel("Files Processed:"), 0, 2)
+        self.processed_label = QLabel("0")
+        self.processed_label.setStyleSheet(
+            "font-weight: bold; color: #1b5e20; background: #e8f5e9; "
+            "padding: 2px 6px; border-radius: 3px;"
+        )
+        activity_status.addWidget(self.processed_label, 0, 3)
+
+        activity_status.addWidget(QLabel("Failed:"), 0, 4)
+        self.failed_label = QLabel("0")
+        self.failed_label.setStyleSheet(
+            "font-weight: bold; color: #b71c1c; background: #ffebee; "
+            "padding: 2px 6px; border-radius: 3px;"
+        )
+        activity_status.addWidget(self.failed_label, 0, 5)
+
+        activity_status.addWidget(QLabel("Last Merge:"), 1, 0)
+        self.last_merge_label = QLabel("(none)")
+        self.last_merge_label.setStyleSheet("color: #555; font-style: italic;")
+        activity_status.addWidget(self.last_merge_label, 1, 1, 1, 5)
+
+        activity_status.addWidget(QLabel("ADV Export Folder:"), 2, 0)
+        self.watch_dir_label = QLabel(self.watch_dir)
+        self.watch_dir_label.setStyleSheet("color: #546e7a;")
+        activity_status.addWidget(self.watch_dir_label, 2, 1, 1, 5)
+
+        log_layout.addLayout(activity_status)
+
+        activity_header = QHBoxLayout()
+        activity_header.addWidget(QLabel("Live operation events"))
+        activity_header.addStretch()
+        self.clear_log_btn = QPushButton("Clear")
+        self.clear_log_btn.clicked.connect(self._clear_activity_log)
+        self.clear_log_btn.setMaximumWidth(90)
+        activity_header.addWidget(self.clear_log_btn)
+        log_layout.addLayout(activity_header)
         
         self.activity_log = QTextEdit()
         self.activity_log.setReadOnly(True)
-        self.activity_log.setMaximumHeight(300)
+        self.activity_log.setMaximumHeight(380)
         self.activity_log.setStyleSheet("""
             QTextEdit {
-                background-color: #f8f8f8;
+                background-color: #f5f7fa;
                 font-family: 'Consolas', 'Monaco', monospace;
                 font-size: 9pt;
+                border: 1px solid #dfe7ee;
             }
         """)
         log_layout.addWidget(self.activity_log)
@@ -226,62 +317,117 @@ class AutoMergeTab(QWidget):
         log_group.setLayout(log_layout)
         layout.addWidget(log_group)
         
-        # === Configuration Section ===
-        config_group = QGroupBox("Advanced Settings")
+        # === Configuration Section (collapsible) ===
+        advanced_toggle_row = QHBoxLayout()
+        self.advanced_toggle_btn = QToolButton()
+        self.advanced_toggle_btn.setCheckable(True)
+        self.advanced_toggle_btn.setChecked(False)
+        self.advanced_toggle_btn.setArrowType(Qt.RightArrow)
+        self.advanced_toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.advanced_toggle_btn.setText("Show Advanced Settings")
+        self.advanced_toggle_btn.setStyleSheet("font-weight: bold;")
+        self.advanced_toggle_btn.toggled.connect(self._toggle_advanced_settings)
+        advanced_toggle_row.addWidget(self.advanced_toggle_btn)
+        advanced_toggle_row.addStretch()
+        layout.addLayout(advanced_toggle_row)
+
+        self.config_group = QGroupBox("3) Advanced Settings (Optional)")
         config_layout = QGridLayout()
-        
-        config_layout.addWidget(QLabel("VXC Logs Folder:"), 0, 0)
-        self.vxc_dir_edit = QLineEdit(self.vxc_dir)
-        config_layout.addWidget(self.vxc_dir_edit, 0, 1)
-        vxc_browse_btn = QPushButton("Browse...")
-        vxc_browse_btn.setMaximumWidth(100)
-        vxc_browse_btn.clicked.connect(self._browse_vxc_directory)
-        config_layout.addWidget(vxc_browse_btn, 0, 2)
+
+        config_layout.addWidget(QLabel("ADV Export Folder:"), 0, 0)
+        self.watch_dir_edit = QLineEdit(self.watch_dir)
+        self.watch_dir_edit.setReadOnly(True)
+        config_layout.addWidget(self.watch_dir_edit, 0, 1)
+        watch_browse_btn = QPushButton("Browse...")
+        watch_browse_btn.setMaximumWidth(100)
+        watch_browse_btn.clicked.connect(self._browse_watch_directory)
+        config_layout.addWidget(watch_browse_btn, 0, 2)
         config_layout.addWidget(
-            self._make_hint_label("Folder where this app writes VXC position logs"),
+            self._make_hint_label("Folder where FlowTracker2 exports ADV CSV files"),
             0,
             3,
         )
         
-        config_layout.addWidget(QLabel("Output Folder:"), 1, 0)
-        self.output_dir_edit = QLineEdit(self.output_dir)
-        config_layout.addWidget(self.output_dir_edit, 1, 1)
-        output_browse_btn = QPushButton("Browse...")
-        output_browse_btn.setMaximumWidth(100)
-        output_browse_btn.clicked.connect(self._browse_output_directory)
-        config_layout.addWidget(output_browse_btn, 1, 2)
+        config_layout.addWidget(QLabel("VXC Logs Folder:"), 1, 0)
+        self.vxc_dir_edit = QLineEdit(self.vxc_dir)
+        config_layout.addWidget(self.vxc_dir_edit, 1, 1)
+        vxc_browse_btn = QPushButton("Browse...")
+        vxc_browse_btn.setMaximumWidth(100)
+        vxc_browse_btn.clicked.connect(self._browse_vxc_directory)
+        config_layout.addWidget(vxc_browse_btn, 1, 2)
         config_layout.addWidget(
-            self._make_hint_label("Merged and averaged CSV files are saved here"),
+            self._make_hint_label("Folder where this app writes VXC position logs"),
             1,
             3,
         )
         
-        config_layout.addWidget(QLabel("Match Tolerance (sec):"), 2, 0)
+        config_layout.addWidget(QLabel("Output Folder:"), 2, 0)
+        self.output_dir_edit = QLineEdit(self.output_dir)
+        config_layout.addWidget(self.output_dir_edit, 2, 1)
+        output_browse_btn = QPushButton("Browse...")
+        output_browse_btn.setMaximumWidth(100)
+        output_browse_btn.clicked.connect(self._browse_output_directory)
+        config_layout.addWidget(output_browse_btn, 2, 2)
+        config_layout.addWidget(
+            self._make_hint_label("Merged and averaged CSV files are saved here"),
+            2,
+            3,
+        )
+        
+        config_layout.addWidget(QLabel("Match Tolerance (sec):"), 3, 0)
         from PyQt5.QtWidgets import QDoubleSpinBox
         self.tolerance_spin = QDoubleSpinBox()
         self.tolerance_spin.setRange(0.1, 5.0)
         self.tolerance_spin.setValue(0.5)
         self.tolerance_spin.setSingleStep(0.1)
         self.tolerance_spin.setSuffix(" s")
-        config_layout.addWidget(self.tolerance_spin, 2, 1)
+        config_layout.addWidget(self.tolerance_spin, 3, 1)
         config_layout.addWidget(
             self._make_hint_label("Maximum time difference between ADV and VXC samples"),
-            2,
+            3,
             3,
         )
         
-        config_group.setLayout(config_layout)
-        layout.addWidget(config_group)
+        self.config_group.setLayout(config_layout)
+        self.config_group.setVisible(False)
+        layout.addWidget(self.config_group)
         
         layout.addStretch()
         self.setLayout(layout)
         
         # Initial log message
         self._log_activity("Auto-merge system initialized", "info")
+        if self._bootstrapped_default_dirs:
+            root = str(Path(self.output_dir).parent)
+            self._log_activity(f"Created default folder structure at: {root}", "success")
         self._log_activity(f"Watch directory: {self.watch_dir}", "info")
 
         # Ensure configured folders exist
         self._ensure_paths()
+
+    def _toggle_session_run_control(self, expanded: bool):
+        """Show/hide Session Run Control panel."""
+        self.session_group.setVisible(expanded)
+        if expanded:
+            self.session_toggle_btn.setArrowType(Qt.DownArrow)
+            self.session_toggle_btn.setText("Hide Session Run Control")
+        else:
+            self.session_toggle_btn.setArrowType(Qt.RightArrow)
+            self.session_toggle_btn.setText("Show Session Run Control")
+
+    def _set_session_run_control_collapsed(self, collapsed: bool):
+        """Programmatically collapse/expand Session Run Control panel."""
+        self.session_toggle_btn.setChecked(not collapsed)
+
+    def _toggle_advanced_settings(self, expanded: bool):
+        """Show/hide Advanced Settings panel."""
+        self.config_group.setVisible(expanded)
+        if expanded:
+            self.advanced_toggle_btn.setArrowType(Qt.DownArrow)
+            self.advanced_toggle_btn.setText("Hide Advanced Settings")
+        else:
+            self.advanced_toggle_btn.setArrowType(Qt.RightArrow)
+            self.advanced_toggle_btn.setText("Show Advanced Settings")
 
     def _make_hint_label(self, tooltip: str) -> QLabel:
         """Create a small hint label with a tooltip."""
@@ -300,11 +446,14 @@ class AutoMergeTab(QWidget):
         self.vxc_logger = vxc_logger
 
     def _ensure_paths(self):
-        """Create VXC logs and output folders if missing."""
+        """Create default watch, VXC log, and output folders if missing."""
+        watch_dir = Path(self.watch_dir)
         vxc_dir = Path(self.vxc_dir_edit.text())
         output_dir = Path(self.output_dir_edit.text())
+        watch_dir.mkdir(parents=True, exist_ok=True)
         vxc_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "sessions").mkdir(parents=True, exist_ok=True)
 
     def handle_vxc_connected(self):
         """Start VXC logging if monitoring is enabled and auto-start is checked."""
@@ -332,6 +481,8 @@ class AutoMergeTab(QWidget):
         if directory:
             self.watch_dir = directory
             self.watch_dir_label.setText(directory)
+            if hasattr(self, 'watch_dir_edit'):
+                self.watch_dir_edit.setText(directory)
             self.settings.setValue("auto_merge/watch_dir", directory)
             self._log_activity(f"Watch directory changed: {directory}", "info")
             
@@ -392,6 +543,8 @@ class AutoMergeTab(QWidget):
         self.settings.setValue("auto_merge/watch_dir", self.watch_dir)
         self.settings.setValue("auto_merge/vxc_dir", vxc_dir)
         self.settings.setValue("auto_merge/output_dir", output_dir)
+        self.settings.setValue("auto_merge/min_correlation_gate", self.min_corr_spin.value())
+        self.settings.setValue("auto_merge/min_snr_gate", self.min_snr_spin.value())
         tolerance = self.tolerance_spin.value()
         
         # Initialize session manager if needed
@@ -417,7 +570,10 @@ class AutoMergeTab(QWidget):
             self.end_session_btn.setEnabled(True)
             self.session_name_edit.setEnabled(False)
             self.operator_edit.setEnabled(False)
+            self.min_corr_spin.setEnabled(False)
+            self.min_snr_spin.setEnabled(False)
             self.save_notes_btn.setEnabled(True)
+            self._set_session_run_control_collapsed(True)
             self._log_activity(f"ℹ️ Continuing active session: {session_id}", "info")
         
         # One-time cleanup of legacy standalone output files in the output root
@@ -639,8 +795,10 @@ class AutoMergeTab(QWidget):
         session_config = SessionConfig(
             session_name=name,
             operator=self.operator_edit.text().strip() or "Unknown",
-            notes=self.notes_edit.text().strip(),
+            notes=self.notes_edit.toPlainText().strip(),
             scan_type="Manual",
+            min_correlation_avg_pct=self.min_corr_spin.value(),
+            min_snr_avg_db=self.min_snr_spin.value(),
         )
         try:
             session_id = self.session_manager.start_session(session_config)
@@ -653,7 +811,10 @@ class AutoMergeTab(QWidget):
             self.end_session_btn.setEnabled(True)
             self.session_name_edit.setEnabled(False)
             self.operator_edit.setEnabled(False)
+            self.min_corr_spin.setEnabled(False)
+            self.min_snr_spin.setEnabled(False)
             self.save_notes_btn.setEnabled(True)
+            self._set_session_run_control_collapsed(True)
 
             self._log_activity(f"✓ Session auto-started: {session_id}", "success")
         except Exception as e:
@@ -688,7 +849,7 @@ class AutoMergeTab(QWidget):
         
         try:
             # Get current values from UI
-            notes = self.notes_edit.text().strip()
+            notes = self.notes_edit.toPlainText().strip()
             operator = self.operator_edit.text().strip()
             
             # Update session configuration
@@ -722,8 +883,10 @@ class AutoMergeTab(QWidget):
         session_config = SessionConfig(
             session_name=session_name,
             operator=self.operator_edit.text().strip() or "Unknown",
-            notes=self.notes_edit.text().strip(),
-            scan_type="Manual"  # Will be updated by cross-section tab if applicable
+            notes=self.notes_edit.toPlainText().strip(),
+            scan_type="Manual",  # Will be updated by cross-section tab if applicable
+            min_correlation_avg_pct=self.min_corr_spin.value(),
+            min_snr_avg_db=self.min_snr_spin.value(),
         )
         
         try:
@@ -742,7 +905,10 @@ class AutoMergeTab(QWidget):
             # Lock session parameters
             self.session_name_edit.setEnabled(False)
             self.operator_edit.setEnabled(False)
+            self.min_corr_spin.setEnabled(False)
+            self.min_snr_spin.setEnabled(False)
             self.save_notes_btn.setEnabled(True)
+            self._set_session_run_control_collapsed(True)
             
             self._log_activity(f"✓ Session started: {session_id}", "success")
 
@@ -787,18 +953,21 @@ class AutoMergeTab(QWidget):
                 # Unlock session parameters
                 self.session_name_edit.setEnabled(True)
                 self.operator_edit.setEnabled(True)
+                self.min_corr_spin.setEnabled(True)
+                self.min_snr_spin.setEnabled(True)
                 self.save_notes_btn.setEnabled(False)
+                self._set_session_run_control_collapsed(False)
                 
                 # Generate new default name for next session
                 self.session_name_edit.setText(self._generate_default_session_name())
                 
                 # Log session summary
                 stats = metadata['statistics']
-                quality = metadata['quality_summary']
+                filter_summary = metadata.get('filter_summary', {})
                 self._log_activity(
                     f"✓ Session ended: {session_id} - "
                     f"{stats['total_measurements']} measurements, "
-                    f"{quality['excellent_points']} excellent, {quality['good_points']} good",
+                    f"{filter_summary.get('filtered_measurements', 0)} filtered measurements",
                     "success"
                 )
                 
@@ -837,10 +1006,10 @@ class AutoMergeTab(QWidget):
             
             # Create table
             table = QTableWidget()
-            table.setColumnCount(13)
+            table.setColumnCount(14)
             table.setHorizontalHeaderLabels([
                 "Session ID", "Name", "Date", "Start Time", "Operator", "Type",
-                "Points", "Valid", "Quality (E/G/F/P)", "Duration (min)",
+                "Points", "Valid", "Filter (Corr/SNR)", "Filtered", "Duration (min)",
                 "Match Rate %", "Total Samples", "Notes",
             ])
             table.horizontalHeader().setStretchLastSection(True)
@@ -852,11 +1021,13 @@ class AutoMergeTab(QWidget):
 
                 table.setRowCount(len(sessions))
                 for i, session in enumerate(sessions):
-                    quality_str = (
-                        f"E:{session.get('excellent_points', '')} "
-                        f"G:{session.get('good_points', '')} "
-                        f"F:{session.get('fair_points', '')} "
-                        f"P:{session.get('poor_points', '')}"
+                    filter_gate = (
+                        f"C>={session.get('min_correlation_avg_pct', '')}, "
+                        f"SNR>={session.get('min_snr_avg_db', '')}"
+                    )
+                    filtered_info = (
+                        f"{session.get('filtered_measurements', '')} "
+                        f"({session.get('filtered_measurement_rate', '')}%)"
                     )
                     table.setItem(i, 0, QTableWidgetItem(session.get('session_id', '')))
                     table.setItem(i, 1, QTableWidgetItem(session.get('session_name', '')))
@@ -866,11 +1037,12 @@ class AutoMergeTab(QWidget):
                     table.setItem(i, 5, QTableWidgetItem(session.get('scan_type', '')))
                     table.setItem(i, 6, QTableWidgetItem(session.get('point_count', '')))
                     table.setItem(i, 7, QTableWidgetItem(session.get('valid_measurements', '')))
-                    table.setItem(i, 8, QTableWidgetItem(quality_str))
-                    table.setItem(i, 9, QTableWidgetItem(session.get('duration_min', '')))
-                    table.setItem(i, 10, QTableWidgetItem(session.get('match_rate', '')))
-                    table.setItem(i, 11, QTableWidgetItem(session.get('total_samples', '')))
-                    table.setItem(i, 12, QTableWidgetItem(session.get('notes', '')))
+                    table.setItem(i, 8, QTableWidgetItem(filter_gate))
+                    table.setItem(i, 9, QTableWidgetItem(filtered_info))
+                    table.setItem(i, 10, QTableWidgetItem(session.get('duration_min', '')))
+                    table.setItem(i, 11, QTableWidgetItem(session.get('match_rate', '')))
+                    table.setItem(i, 12, QTableWidgetItem(session.get('total_samples', '')))
+                    table.setItem(i, 13, QTableWidgetItem(session.get('notes', '')))
             
             table.resizeColumnsToContents()
             layout.addWidget(table)

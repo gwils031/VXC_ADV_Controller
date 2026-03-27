@@ -190,7 +190,7 @@ class VXCLogWorker(QObject):
                 else:
                     # VXC not responding - log (0,0) to maintain timeline
                     logger.warning("VXC position unavailable, logging (0,0)")
-                    self.logger.log_position(x_steps=0, y_steps=0, quality="NO_RESPONSE")
+                    self.logger.log_position(x_steps=0, y_steps=0, quality="VXC Moving")
                     consecutive_errors += 1
                     
             except Exception as e:
@@ -201,7 +201,7 @@ class VXCLogWorker(QObject):
                 
                 # Try to log error position to maintain timeline
                 try:
-                    self.logger.log_position(x_steps=0, y_steps=0, quality="ERROR")
+                    self.logger.log_position(x_steps=0, y_steps=0, quality="VXC Moving")
                 except:
                     pass
                 
@@ -955,71 +955,103 @@ class MainWindow(QMainWindow):
         """Create VXC controller tab."""
         widget = QWidget()
         layout = QVBoxLayout()
-        layout.setSpacing(12)
+        layout.setSpacing(10)
         layout.setContentsMargins(12, 12, 12, 12)
-        
+
+        # Quick workflow hint
+        workflow_hint = QLabel(
+            "Workflow: 1) Connect controller  2) Verify live position  3) Move stage  4) Calibrate when needed"
+        )
+        workflow_hint.setStyleSheet(
+            "color: #37474f; background: #eef3f6; border: 1px solid #d7e2e8; "
+            "border-radius: 4px; padding: 8px;"
+        )
+        layout.addWidget(workflow_hint)
+
         # Connection section
-        conn_group = QGroupBox("VXC Connection")
-        conn_layout = QHBoxLayout()
-        
-        conn_layout.addWidget(QLabel("Port:"))
+        conn_group = QGroupBox("1) Connect VXC")
+        conn_layout = QGridLayout()
+        conn_layout.setHorizontalSpacing(10)
+        conn_layout.setVerticalSpacing(8)
+
+        conn_layout.addWidget(QLabel("Serial Port:"), 0, 0)
         self.vxc_port_combo = QComboBox()
-        conn_layout.addWidget(self.vxc_port_combo)
-        
+        conn_layout.addWidget(self.vxc_port_combo, 0, 1)
+
+        conn_layout.addWidget(QLabel("Connection:"), 0, 2)
         self.vxc_status_label = QLabel("Not Connected")
         self.vxc_status_label.setStyleSheet("color: red; font-weight: bold;")
-        conn_layout.addWidget(self.vxc_status_label)
+        conn_layout.addWidget(self.vxc_status_label, 0, 3)
 
-        self.vxc_autodetect_btn = QPushButton("Auto Detect VXC")
-        self.vxc_autodetect_btn.setStyleSheet("QPushButton:hover { background-color: #e0e0e0; }")
+        self.vxc_autodetect_btn = QPushButton("Connect / Auto Detect")
+        self.vxc_autodetect_btn.setStyleSheet(
+            "QPushButton { background-color: #1f7a8c; color: white; font-weight: bold; padding: 6px 12px; }"
+            "QPushButton:hover { background-color: #186474; }"
+        )
         self.vxc_autodetect_btn.clicked.connect(self._auto_detect_vxc)
-        conn_layout.addWidget(self.vxc_autodetect_btn)
-        
+        conn_layout.addWidget(self.vxc_autodetect_btn, 1, 1)
+
         self.vxc_disconnect_btn = QPushButton("Disconnect")
         self.vxc_disconnect_btn.setStyleSheet("QPushButton:hover { background-color: #e0e0e0; }")
         self.vxc_disconnect_btn.clicked.connect(self._disconnect_vxc)
         self.vxc_disconnect_btn.setEnabled(False)
-        conn_layout.addWidget(self.vxc_disconnect_btn)
-        
-        conn_layout.addStretch()
+        conn_layout.addWidget(self.vxc_disconnect_btn, 1, 2)
+
+        connect_tip = QLabel("Tip: use Auto Detect first; manual port selection is still available.")
+        connect_tip.setStyleSheet("color: #546e7a; font-size: 9pt;")
+        conn_layout.addWidget(connect_tip, 2, 0, 1, 4)
+
+        conn_layout.setColumnStretch(1, 1)
+        conn_layout.setColumnStretch(3, 1)
         conn_group.setLayout(conn_layout)
         layout.addWidget(conn_group)
-        
+
         # Position display
-        pos_group = QGroupBox("Current Position")
+        pos_group = QGroupBox("2) Live Position")
         pos_layout = QHBoxLayout()
-        
+
         self.vxc_x_label = QLabel("X: --- m")
-        self.vxc_x_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        self.vxc_x_label.setStyleSheet(
+            "font-size: 18pt; font-weight: bold; color: #102a43; "
+            "background: #f7fafc; border: 1px solid #d9e2ec; border-radius: 4px; padding: 8px 12px;"
+        )
         pos_layout.addWidget(self.vxc_x_label)
-        
+
         pos_layout.addSpacing(20)
-        
+
         self.vxc_y_label = QLabel("Y: --- m")
-        self.vxc_y_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        self.vxc_y_label.setStyleSheet(
+            "font-size: 18pt; font-weight: bold; color: #102a43; "
+            "background: #f7fafc; border: 1px solid #d9e2ec; border-radius: 4px; padding: 8px 12px;"
+        )
         pos_layout.addWidget(self.vxc_y_label)
-        
+
         pos_layout.addStretch()
         pos_group.setLayout(pos_layout)
         layout.addWidget(pos_group)
-        
-        # Jog controls
-        jog_group = QGroupBox("Jog Controls")
+
+        # Movement controls
+        movement_group = QGroupBox("3) Motion Controls")
+        movement_layout = QHBoxLayout()
+        movement_layout.setSpacing(12)
+
+        # Manual jog controls
+        jog_group = QGroupBox("Manual Jog")
         jog_layout = QVBoxLayout()
-        
+
         # Step size selection
         step_layout = QHBoxLayout()
-        step_layout.addWidget(QLabel("Jog Distance:"))
+        step_layout.addWidget(QLabel("Jog Step:"))
         self.vxc_step_combo = QComboBox()
         self.vxc_step_combo.addItems(["6.35 mm", "12.7 mm", "19.05 mm", "25.4 mm"])
         self.vxc_step_combo.setCurrentIndex(1)
         step_layout.addWidget(self.vxc_step_combo)
         step_layout.addStretch()
         jog_layout.addLayout(step_layout)
-        
+
         # Arrow buttons in grid
         arrows_layout = QGridLayout()
-        
+
         # Y+ button
         self.jog_y_plus = QPushButton("Y+")
         self.jog_y_plus.setStyleSheet("QPushButton:hover { background-color: #b3d9ff; }")
@@ -1057,20 +1089,26 @@ class MainWindow(QMainWindow):
         arrows_layout.setColumnStretch(0, 1)
         arrows_layout.setColumnStretch(1, 1)
         arrows_layout.setColumnStretch(2, 1)
-        
+
         jog_layout.addLayout(arrows_layout)
+
+        jog_hint = QLabel("Press and hold arrows for incremental movement.")
+        jog_hint.setStyleSheet("color: #546e7a; font-size: 9pt;")
+        jog_layout.addWidget(jog_hint)
         jog_group.setLayout(jog_layout)
-        layout.addWidget(jog_group)
-        
-        # Jog to position controls (Minimal Viable)
-        jog_to_group = QGroupBox("Jog to Position (X→Y)")
+
+        # Jog to position controls
+        jog_to_group = QGroupBox("Move To Absolute Position")
         jog_to_layout = QVBoxLayout()
-        
+
         # Instructions
-        info_label = QLabel("1. Connect VXC Controller\n2. Drag sliders to target\n3. Click Go")
-        info_label.setStyleSheet("color: #6c757d; font-size: 10pt; padding: 5px; background: #f8f9fa; border-radius: 3px;")
+        info_label = QLabel("1. Connect VXC\n2. Drag sliders to target location\n3. Click Move To Target")
+        info_label.setStyleSheet(
+            "color: #455a64; font-size: 10pt; padding: 6px; "
+            "background: #f5f7fa; border: 1px solid #dfe7ee; border-radius: 3px;"
+        )
         jog_to_layout.addWidget(info_label)
-        
+
         # Plane dimensions (from boundary manager)
         # Origin (0,0) is at bottom-LEFT
         # X axis: positive rightward
@@ -1104,7 +1142,7 @@ class MainWindow(QMainWindow):
         x_range_label.setStyleSheet("color: #6c757d; font-size: 9pt;")
         x_slider_layout.addWidget(x_range_label)
         jog_to_layout.addLayout(x_slider_layout)
-        
+
         # Y position slider (absolute height in flume)
         y_slider_layout = QVBoxLayout()
         y_label_row = QHBoxLayout()
@@ -1130,9 +1168,9 @@ class MainWindow(QMainWindow):
         y_range_label.setStyleSheet("color: #6c757d; font-size: 9pt;")
         y_slider_layout.addWidget(y_range_label)
         jog_to_layout.addLayout(y_slider_layout)
-        
+
         # Go button
-        self.jog_go_btn = QPushButton("GO (Y first, then X)")
+        self.jog_go_btn = QPushButton("Move To Target")
         self.jog_go_btn.setStyleSheet("""
             QPushButton { 
                 background-color: #28a745; 
@@ -1152,26 +1190,32 @@ class MainWindow(QMainWindow):
         self.jog_go_btn.setEnabled(False)
         self.jog_go_btn.clicked.connect(self._jog_to_position)
         jog_to_layout.addWidget(self.jog_go_btn)
-        
+
         # Status label
         self.jog_to_status = QLabel("Ready")
         self.jog_to_status.setStyleSheet("color: #28a745; font-weight: bold;")
         jog_to_layout.addWidget(self.jog_to_status)
-        
-        jog_to_group.setLayout(jog_to_layout)
-        layout.addWidget(jog_to_group)
 
-        # Workspace Calibration
-        boundary_group = QGroupBox("Workspace Calibration")
+        jog_to_group.setLayout(jog_to_layout)
+        movement_layout.addWidget(jog_group, 1)
+        movement_layout.addWidget(jog_to_group, 2)
+        movement_group.setLayout(movement_layout)
+        layout.addWidget(movement_group)
+
+        # Workspace calibration and maintenance
+        boundary_group = QGroupBox("4) Calibration & Maintenance")
         boundary_layout = QVBoxLayout()
 
         # Display current workspace bounds
         self.workspace_bounds_label = QLabel(self._format_workspace_bounds())
-        self.workspace_bounds_label.setStyleSheet("color: #555; font-weight: bold; padding: 5px; background: #f0f0f0; border-radius: 3px;")
+        self.workspace_bounds_label.setStyleSheet(
+            "color: #455a64; font-weight: bold; padding: 6px; "
+            "background: #f5f7fa; border: 1px solid #dfe7ee; border-radius: 3px;"
+        )
         boundary_layout.addWidget(self.workspace_bounds_label)
 
         # Calibrate workspace button
-        self.calibrate_workspace_btn = QPushButton("⚙ Calibrate Workspace Bounds")
+        self.calibrate_workspace_btn = QPushButton("Calibrate Workspace Bounds")
         self.calibrate_workspace_btn.setStyleSheet(
             "QPushButton { background-color: #ff8c00; color: white; font-weight: bold; "
             "font-size: 12px; padding: 10px; } "
@@ -1183,7 +1227,7 @@ class MainWindow(QMainWindow):
         boundary_layout.addWidget(self.calibrate_workspace_btn)
 
         # Legacy origin finding (kept for compatibility)
-        self.find_origin_btn = QPushButton("Find Origin (0,0) Only")
+        self.find_origin_btn = QPushButton("Advanced: Find Origin (0,0) Only")
         self.find_origin_btn.setStyleSheet(
             "QPushButton { background-color: #6c757d; color: white; font-weight: bold; "
             "font-size: 10px; padding: 8px; } "
@@ -1197,29 +1241,15 @@ class MainWindow(QMainWindow):
         self.boundary_status_label.setStyleSheet("color: #555; font-weight: bold;")
         boundary_layout.addWidget(self.boundary_status_label)
 
-        boundary_group.setLayout(boundary_layout)
-        layout.addWidget(boundary_group)
-        
-        # Action buttons
-        btn_layout = QVBoxLayout()
-        
         zero_btn = QPushButton("Zero Position")
         zero_btn.setStyleSheet("QPushButton:hover { background-color: #e0e0e0; }")
-        zero_btn.setMinimumHeight(40)
+        zero_btn.setMinimumHeight(38)
         zero_btn.clicked.connect(self._vxc_zero)
-        
-        # Center buttons horizontally
-        btn_container = QHBoxLayout()
-        btn_container.addStretch()
-        
-        btn_vertical = QVBoxLayout()
-        btn_vertical.addWidget(zero_btn)
-        
-        btn_container.addLayout(btn_vertical)
-        btn_container.addStretch()
-        
-        layout.addLayout(btn_container)
-        
+        boundary_layout.addWidget(zero_btn)
+
+        boundary_group.setLayout(boundary_layout)
+        layout.addWidget(boundary_group)
+
         layout.addStretch()
         widget.setLayout(layout)
         return widget

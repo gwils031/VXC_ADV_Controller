@@ -13,12 +13,16 @@ from datetime import datetime
 
 import numpy as np
 import yaml
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 from PyQt5.QtCore import QObject, QThread, pyqtSignal, Qt, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton,
     QLabel, QDoubleSpinBox, QSpinBox, QPushButton, QProgressBar,
-    QTextEdit, QMessageBox, QButtonGroup, QGridLayout
+    QMessageBox, QButtonGroup, QGridLayout, QFrame, QTableWidget,
+    QTableWidgetItem, QHeaderView, QAbstractItemView
 )
+from PyQt5.QtGui import QColor
 
 from .range_slider import QRangeSlider
 
@@ -35,6 +39,7 @@ class CrossSectionWorker(QObject):
     position_error = pyqtSignal(str)  # Recoverable error — user can skip or stop
     status_update = pyqtSignal(str)
     eta_update = pyqtSignal(float, float, int, int)  # elapsed_sec, remaining_sec, current_pos, total_pos
+    run_finished = pyqtSignal()  # Emitted on every run exit path so UI can cleanly shut down the thread
     
     def __init__(self, controller, positions: List[Dict[str, float]], 
                  dwell_time_sec: float, settling_time_sec: float = 2.0, speed: int = 2000):
@@ -252,6 +257,8 @@ class CrossSectionWorker(QObject):
             error_msg = f"Automation error: {e}"
             logger.exception(error_msg)
             self.error.emit(error_msg)
+        finally:
+            self.run_finished.emit()
     
     def stop(self):
         """Stop the automation."""
@@ -301,6 +308,7 @@ class CrossSectionTab(QWidget):
         self.worker_thread = None
         self.calculated_positions = []
         self.completed_positions = []
+        self._run_outcome = "idle"
         
         # ETA tracking
         self.eta_timer = QTimer()
@@ -353,10 +361,15 @@ class CrossSectionTab(QWidget):
     def _setup_ui(self):
         """Setup the user interface."""
         layout = QVBoxLayout()
+        layout.setSpacing(8)
         
         # Route Configuration Section
         route_group = self._create_route_config_group()
         layout.addWidget(route_group)
+
+        # Live route summary strip
+        summary_group = self._create_summary_group()
+        layout.addWidget(summary_group)
         
         # Automation Control Section
         control_group = self._create_control_group()
@@ -367,13 +380,38 @@ class CrossSectionTab(QWidget):
         layout.addWidget(preview_group, stretch=1)
         
         self.setLayout(layout)
+        self._refresh_route_summary()
     
     def _create_route_config_group(self) -> QGroupBox:
         """Create route configuration UI group."""
         group = QGroupBox("Route Configuration")
         layout = QVBoxLayout()
+        layout.setSpacing(8)
+
+        workflow_hint = QLabel("1) Select mode  2) Set range and point density  3) Set timing  4) Calculate route")
+        workflow_hint.setStyleSheet("color: #495057; font-size: 9pt;")
+        layout.addWidget(workflow_hint)
+
+        card_style = (
+            "QFrame {"
+            " background-color: #f8f9fa;"
+            " border: 1px solid #dee2e6;"
+            " border-radius: 4px;"
+            " padding: 6px;"
+            "}"
+        )
         
         # Scan type selection
+        mode_card = QFrame()
+        mode_card.setStyleSheet(card_style)
+        mode_card_layout = QVBoxLayout(mode_card)
+        mode_card_layout.setContentsMargins(8, 6, 8, 6)
+        mode_card_layout.setSpacing(6)
+
+        mode_title = QLabel("Scan Mode")
+        mode_title.setStyleSheet("font-weight: bold; color: #212529;")
+        mode_card_layout.addWidget(mode_title)
+
         scan_layout = QHBoxLayout()
         scan_layout.addWidget(QLabel("Scan Type:"))
         
@@ -388,25 +426,40 @@ class CrossSectionTab(QWidget):
         
         self.vertical_radio.setChecked(True)
         self.vertical_radio.toggled.connect(self._on_scan_type_changed)
+        self.horizontal_radio.toggled.connect(self._on_scan_type_changed)
+        self.grid_radio.toggled.connect(self._on_scan_type_changed)
         
         scan_layout.addWidget(self.vertical_radio)
         scan_layout.addWidget(self.horizontal_radio)
         scan_layout.addWidget(self.grid_radio)
         scan_layout.addStretch()
-        
-        layout.addLayout(scan_layout)
+
+        mode_card_layout.addLayout(scan_layout)
+        layout.addWidget(mode_card)
         
         # Position input fields (dynamic based on scan type)
         self.position_grid = QGridLayout()
+        self.position_grid.setHorizontalSpacing(10)
+        self.position_grid.setVerticalSpacing(6)
         
         # Workspace limits for reference
         x_max_m = self._steps_to_meters(self.X_MAX_STEPS)
         y_max_m = self._steps_to_meters(self.Y_MAX_STEPS)
+
+        range_card = QFrame()
+        range_card.setStyleSheet(card_style)
+        range_card_layout = QVBoxLayout(range_card)
+        range_card_layout.setContentsMargins(8, 6, 8, 6)
+        range_card_layout.setSpacing(6)
+
+        range_title = QLabel("Scan Area and Point Density")
+        range_title.setStyleSheet("font-weight: bold; color: #212529;")
+        range_card_layout.addWidget(range_title)
         
         info_text = f"Workspace: X: 0 to {x_max_m:.4f} m, Y: 0 to {y_max_m:.4f} m"
         self.workspace_label = QLabel(info_text)
         self.workspace_label.setStyleSheet("color: #666; font-size: 9pt;")
-        layout.addWidget(self.workspace_label)
+        range_card_layout.addWidget(self.workspace_label)
         
         # Vertical line inputs
         self.x_fixed_label = QLabel("X Position (m):")
@@ -464,11 +517,29 @@ class CrossSectionTab(QWidget):
         self.grid_y_points_spin = QSpinBox()
         self.grid_y_points_spin.setRange(2, 50)
         self.grid_y_points_spin.setValue(self.default_grid_y_points)
+
+        self.x_fixed_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
+        self.y_fixed_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
+        self.x_points_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
+        self.y_points_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
+        self.grid_x_points_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
+        self.grid_y_points_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
         
         # Add to position grid (will be shown/hidden based on scan type)
-        layout.addLayout(self.position_grid)
+        range_card_layout.addLayout(self.position_grid)
+        layout.addWidget(range_card)
         
         # Timing configuration
+        timing_card = QFrame()
+        timing_card.setStyleSheet(card_style)
+        timing_card_layout = QVBoxLayout(timing_card)
+        timing_card_layout.setContentsMargins(8, 6, 8, 6)
+        timing_card_layout.setSpacing(6)
+
+        timing_title = QLabel("Timing")
+        timing_title.setStyleSheet("font-weight: bold; color: #212529;")
+        timing_card_layout.addWidget(timing_title)
+
         timing_layout = QHBoxLayout()
         timing_layout.addWidget(QLabel("Dwell Time (seconds/point):"))
         
@@ -477,6 +548,7 @@ class CrossSectionTab(QWidget):
         self.dwell_time_spin.setDecimals(1)
         self.dwell_time_spin.setSingleStep(5.0)
         self.dwell_time_spin.setValue(self.default_dwell_time)
+        self.dwell_time_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
         timing_layout.addWidget(self.dwell_time_spin)
         
         timing_layout.addWidget(QLabel("Settling Time (seconds):"))
@@ -485,10 +557,12 @@ class CrossSectionTab(QWidget):
         self.settling_time_spin.setDecimals(1)
         self.settling_time_spin.setSingleStep(0.5)
         self.settling_time_spin.setValue(self.default_settling_time)
+        self.settling_time_spin.valueChanged.connect(lambda _: self._refresh_route_summary())
         timing_layout.addWidget(self.settling_time_spin)
         
         timing_layout.addStretch()
-        layout.addLayout(timing_layout)
+        timing_card_layout.addLayout(timing_layout)
+        layout.addWidget(timing_card)
         
         group.setLayout(layout)
         
@@ -496,6 +570,30 @@ class CrossSectionTab(QWidget):
         self._on_scan_type_changed()
         
         return group
+
+    def _create_summary_group(self) -> QFrame:
+        """Create a compact live summary strip for the current route inputs."""
+        panel = QFrame()
+        panel.setStyleSheet(
+            "QFrame {"
+            " background-color: #eef4ff;"
+            " border: 1px solid #c9dbff;"
+            " border-radius: 4px;"
+            "}"
+        )
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(10)
+
+        title = QLabel("Route Summary")
+        title.setStyleSheet("font-weight: bold; color: #1f4fa2;")
+        layout.addWidget(title)
+
+        self.summary_label = QLabel("Waiting for route inputs")
+        self.summary_label.setStyleSheet("color: #1f4fa2;")
+        layout.addWidget(self.summary_label, 1)
+
+        return panel
     
     def _create_control_group(self) -> QGroupBox:
         """Create automation control UI group."""
@@ -571,11 +669,38 @@ class CrossSectionTab(QWidget):
         """Create route preview UI group."""
         group = QGroupBox("Route Preview")
         layout = QVBoxLayout()
-        
-        self.preview_text = QTextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setStyleSheet("font-family: 'Courier New'; font-size: 9pt;")
-        layout.addWidget(self.preview_text)
+
+        preview_hint = QLabel("Path map (top) and route table (bottom).")
+        preview_hint.setStyleSheet("color: #666; font-size: 9pt;")
+        layout.addWidget(preview_hint)
+
+        self.preview_figure = Figure(figsize=(6, 2.2), dpi=100, constrained_layout=True)
+        self.preview_canvas = FigureCanvas(self.preview_figure)
+        self.preview_ax = self.preview_figure.add_subplot(111)
+        self.preview_canvas.setMinimumHeight(170)
+        layout.addWidget(self.preview_canvas)
+
+        self.preview_table = QTableWidget(0, 6)
+        self.preview_table.setHorizontalHeaderLabels([
+            "#", "X (m)", "Y (m)", "X (steps)", "Y (steps)", "Status"
+        ])
+        self.preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.preview_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.preview_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.preview_table.setAlternatingRowColors(True)
+        self.preview_table.verticalHeader().setVisible(False)
+
+        header = self.preview_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+
+        layout.addWidget(self.preview_table)
+
+        self._update_route_plot()
         
         group.setLayout(layout)
         return group
@@ -621,6 +746,8 @@ class CrossSectionTab(QWidget):
             self.position_grid.addWidget(self.y_range_value_label, 1, 3)
             self.position_grid.addWidget(QLabel("Y Point Count:"), 2, 2)
             self.position_grid.addWidget(self.grid_y_points_spin, 2, 3)
+
+        self._refresh_route_summary()
     
     def _calculate_route(self):
         """Calculate and display the measurement route."""
@@ -743,6 +870,7 @@ class CrossSectionTab(QWidget):
                 f"{len(positions)} positions calculated. Estimated time: {total_time_min:.1f} minutes"
             )
             self.route_info_label.setStyleSheet("color: #28a745; font-weight: bold;")
+            self._refresh_route_summary()
             
             # Enable start button
             self.start_btn.setEnabled(True)
@@ -752,24 +880,24 @@ class CrossSectionTab(QWidget):
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate route:\n{e}")
     
     def _update_preview(self):
-        """Update the route preview text."""
+        """Update the route preview table."""
         if not self.calculated_positions:
-            self.preview_text.setPlainText("No route calculated")
+            self.preview_table.setRowCount(0)
+            self._update_route_plot()
             return
-        
-        lines = ["Position | X (m)      | Y (m)      | X (steps) | Y (steps) | Status"]
-        lines.append("-" * 75)
+
+        self.preview_table.setRowCount(len(self.calculated_positions))
+        current_progress = len(self.completed_positions)
         
         for i, pos in enumerate(self.calculated_positions):
             x_m = pos['x_m']
             y_m = pos['y_m']
             x_steps = pos['x_steps']
             y_steps = pos['y_steps']
-            
+
             if i in self.completed_positions:
                 status = "✓ Complete"
             elif self.worker and self.worker_thread and self.worker_thread.isRunning():
-                current_progress = len(self.completed_positions)
                 if i == current_progress:
                     status = "→ Current"
                 elif i < current_progress:
@@ -778,14 +906,165 @@ class CrossSectionTab(QWidget):
                     status = "Pending"
             else:
                 status = "Pending"
-            
-            line = f"{i+1:8d} | {x_m:10.4f} | {y_m:10.4f} | {x_steps:9d} | {y_steps:9d} | {status}"
-            lines.append(line)
-        
-        self.preview_text.setPlainText("\n".join(lines))
+
+            row_items = [
+                QTableWidgetItem(str(i + 1)),
+                QTableWidgetItem(f"{x_m:.4f}"),
+                QTableWidgetItem(f"{y_m:.4f}"),
+                QTableWidgetItem(str(x_steps)),
+                QTableWidgetItem(str(y_steps)),
+                QTableWidgetItem(status),
+            ]
+
+            if status == "→ Current":
+                row_color = QColor("#fff3cd")
+            elif status == "✓ Complete":
+                row_color = QColor("#d1e7dd")
+            else:
+                row_color = None
+
+            for col, item in enumerate(row_items):
+                if row_color is not None:
+                    item.setBackground(row_color)
+                self.preview_table.setItem(i, col, item)
+
+        if self.worker and self.worker_thread and self.worker_thread.isRunning():
+            if 0 <= current_progress < self.preview_table.rowCount():
+                self.preview_table.scrollToItem(self.preview_table.item(current_progress, 0))
+
+        self._update_route_plot()
+
+    def _update_route_plot(self):
+        """Render a compact map of route order and progress state."""
+        if not hasattr(self, 'preview_ax'):
+            return
+
+        self.preview_ax.clear()
+        self.preview_ax.set_facecolor('#f8f9fa')
+
+        if not self.calculated_positions:
+            self.preview_ax.set_xticks([])
+            self.preview_ax.set_yticks([])
+            for spine in self.preview_ax.spines.values():
+                spine.set_visible(False)
+            self.preview_ax.text(
+                0.5,
+                0.5,
+                "No route calculated",
+                ha='center',
+                va='center',
+                transform=self.preview_ax.transAxes,
+                color='#6c757d',
+                fontsize=10,
+            )
+            self.preview_canvas.draw_idle()
+            return
+
+        x_vals = np.array([pos['x_m'] for pos in self.calculated_positions], dtype=float)
+        y_vals = np.array([pos['y_m'] for pos in self.calculated_positions], dtype=float)
+
+        self.preview_ax.plot(x_vals, y_vals, color='#0d6efd', linewidth=1.5, alpha=0.7, zorder=1)
+        self.preview_ax.scatter(x_vals, y_vals, s=28, color='#adb5bd', edgecolors='white', linewidths=0.5, zorder=2)
+
+        if self.completed_positions:
+            done_idx = np.array(sorted(set(i for i in self.completed_positions if 0 <= i < len(x_vals))))
+            if done_idx.size > 0:
+                self.preview_ax.scatter(
+                    x_vals[done_idx],
+                    y_vals[done_idx],
+                    s=36,
+                    color='#198754',
+                    edgecolors='white',
+                    linewidths=0.6,
+                    zorder=3,
+                )
+
+        if self.worker and self.worker_thread and self.worker_thread.isRunning():
+            current_idx = len(self.completed_positions)
+            if 0 <= current_idx < len(x_vals):
+                self.preview_ax.scatter(
+                    [x_vals[current_idx]],
+                    [y_vals[current_idx]],
+                    s=90,
+                    facecolors='none',
+                    edgecolors='#fd7e14',
+                    linewidths=2.0,
+                    zorder=4,
+                )
+
+        self.preview_ax.scatter([x_vals[0]], [y_vals[0]], s=52, color='#20c997', edgecolors='white', linewidths=0.8, zorder=5)
+        self.preview_ax.scatter([x_vals[-1]], [y_vals[-1]], s=52, color='#dc3545', edgecolors='white', linewidths=0.8, zorder=5)
+
+        self.preview_ax.set_title("Route Map", fontsize=10, fontweight='bold', color='#212529')
+        self.preview_ax.set_xlabel("X (m)", fontsize=9)
+        self.preview_ax.set_ylabel("Y (m)", fontsize=9)
+        self.preview_ax.grid(True, linestyle='--', alpha=0.25)
+
+        x_span = float(np.max(x_vals) - np.min(x_vals)) if len(x_vals) > 1 else 0.1
+        y_span = float(np.max(y_vals) - np.min(y_vals)) if len(y_vals) > 1 else 0.1
+        x_pad = max(0.02, x_span * 0.08)
+        y_pad = max(0.02, y_span * 0.08)
+        self.preview_ax.set_xlim(float(np.min(x_vals)) - x_pad, float(np.max(x_vals)) + x_pad)
+        self.preview_ax.set_ylim(float(np.min(y_vals)) - y_pad, float(np.max(y_vals)) + y_pad)
+
+        self.preview_canvas.draw_idle()
+
+    def _refresh_route_summary(self):
+        """Refresh the compact route summary strip from current UI inputs."""
+        if not hasattr(self, 'summary_label'):
+            return
+
+        scan_type = self.scan_type_group.checkedId() if hasattr(self, 'scan_type_group') else 0
+        dwell_time = self.dwell_time_spin.value() if hasattr(self, 'dwell_time_spin') else self.default_dwell_time
+        settling_time = self.settling_time_spin.value() if hasattr(self, 'settling_time_spin') else self.default_settling_time
+
+        mode_label = "Vertical"
+        point_count = 0
+
+        if scan_type == 0:
+            mode_label = "Vertical"
+            point_count = self.y_points_spin.value()
+            y_start, y_end = self.y_range_slider.values()
+            detail = f"X={self.x_fixed_spin.value():.4f} m, Y {y_start:.4f}→{y_end:.4f} m"
+        elif scan_type == 1:
+            mode_label = "Horizontal"
+            point_count = self.x_points_spin.value()
+            x_start, x_end = self.x_range_slider.values()
+            detail = f"Y={self.y_fixed_spin.value():.4f} m, X {x_start:.4f}→{x_end:.4f} m"
+        else:
+            mode_label = "XY Grid"
+            point_count = self.grid_x_points_spin.value() * self.grid_y_points_spin.value()
+            x_start, x_end = self.x_range_slider.values()
+            y_start, y_end = self.y_range_slider.values()
+            detail = (
+                f"X {x_start:.4f}→{x_end:.4f} m, Y {y_start:.4f}→{y_end:.4f} m, "
+                f"{self.grid_x_points_spin.value()}x{self.grid_y_points_spin.value()}"
+            )
+
+        time_per_point = dwell_time + settling_time + 5.0
+        total_seconds = point_count * time_per_point
+        total_text = self._format_duration(total_seconds)
+
+        self.summary_label.setText(
+            f"{mode_label} | {point_count} points | Dwell {dwell_time:.1f}s | "
+            f"Settle {settling_time:.1f}s | Est. total {total_text} | {detail}"
+        )
+
+    def _format_duration(self, total_seconds: float) -> str:
+        """Format seconds as mm:ss or hh:mm:ss."""
+        total = max(0, int(round(total_seconds)))
+        hours, remainder = divmod(total, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours > 0:
+            return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
     
     def _start_automation(self):
         """Start the automated measurement sequence."""
+        if self.worker_thread and self.worker_thread.isRunning():
+            QMessageBox.warning(self, "Automation Running", "A scan is already running.")
+            return
+
         if not self.calculated_positions:
             QMessageBox.warning(self, "No Route", "Please calculate a route first")
             return
@@ -823,6 +1102,9 @@ class CrossSectionTab(QWidget):
         self.start_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
+        self.skip_btn.setEnabled(False)
+        self._run_outcome = "running"
+        self.status_label.setText("Starting scan...")
         
         # Reset progress
         self.completed_positions = []
@@ -855,7 +1137,9 @@ class CrossSectionTab(QWidget):
         self.worker.error.connect(self._on_error)
         self.worker.position_error.connect(self._on_position_error)
         self.worker.completed.connect(self._on_completed)
-        self.worker.completed.connect(self.worker_thread.quit)
+        self.worker.run_finished.connect(self.worker_thread.quit)
+        self.worker_thread.finished.connect(self.worker.deleteLater)
+        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.worker_thread.finished.connect(self._cleanup)
         
         # Start automation
@@ -900,7 +1184,10 @@ class CrossSectionTab(QWidget):
         
         if reply == QMessageBox.Yes:
             self.worker.stop()
+            self._run_outcome = "stopped"
             self.status_label.setText("Stopping...")
+            self.stop_btn.setEnabled(False)
+            self.pause_btn.setEnabled(False)
             logger.info("Automation stop requested")
     
     def _on_progress(self, current: int, total: int):
@@ -958,9 +1245,9 @@ class CrossSectionTab(QWidget):
     
     def _on_error(self, error_msg: str):
         """Handle error from worker."""
+        self._run_outcome = "error"
         QMessageBox.critical(self, "Automation Error", error_msg)
         self.status_label.setText(f"Error: {error_msg}")
-        self._cleanup()
 
     def _on_position_error(self, error_msg: str):
         """Handle a recoverable position error — enables Skip button to continue scan."""
@@ -980,6 +1267,7 @@ class CrossSectionTab(QWidget):
     
     def _on_completed(self):
         """Handle automation completion."""
+        self._run_outcome = "completed"
         QMessageBox.information(self, "Complete", 
                                f"Cross-section scan completed successfully!\n"
                                f"{len(self.completed_positions)} positions measured.")
@@ -991,12 +1279,19 @@ class CrossSectionTab(QWidget):
         # Stop ETA timer
         self.eta_timer.stop()
         
-        # Show final time if automation completed
+        # Show final run timing and outcome
         if self.automation_start_time:
             final_elapsed = time.time() - self.automation_start_time - self.total_pause_time
             elapsed_min = int(final_elapsed // 60)
             elapsed_sec = int(final_elapsed % 60)
-            self.eta_label.setText(f"✓ Completed in {elapsed_min:02d}:{elapsed_sec:02d}")
+            if self._run_outcome == "completed":
+                self.eta_label.setText(f"✓ Completed in {elapsed_min:02d}:{elapsed_sec:02d}")
+            elif self._run_outcome == "stopped":
+                self.eta_label.setText(f"■ Stopped at {elapsed_min:02d}:{elapsed_sec:02d}")
+            elif self._run_outcome == "error":
+                self.eta_label.setText(f"! Error after {elapsed_min:02d}:{elapsed_sec:02d}")
+            else:
+                self.eta_label.setText(f"Elapsed: {elapsed_min:02d}:{elapsed_sec:02d}")
         else:
             self.eta_label.setText("")
         
@@ -1017,6 +1312,7 @@ class CrossSectionTab(QWidget):
         
         self.worker = None
         self.worker_thread = None
+        self._run_outcome = "idle"
         
         self._update_preview()
     
@@ -1148,12 +1444,16 @@ class CrossSectionTab(QWidget):
         if hasattr(self, 'y_fixed_spin'):
             self.y_fixed_spin.setRange(0.0, y_max_m)
             self.y_fixed_spin.setValue(min(self.y_fixed_spin.value(), y_max_m))
+
+        self._refresh_route_summary()
     
     def _update_y_range_label(self, low: float, high: float):
         """Update Y range label when slider changes."""
         self.y_range_value_label.setText(f"{low:.4f} m \u2192 {high:.4f} m")
+        self._refresh_route_summary()
     
     def _update_x_range_label(self, low: float, high: float):
         """Update X range label when slider changes."""
         self.x_range_value_label.setText(f"{low:.4f} m \u2192 {high:.4f} m")
+        self._refresh_route_summary()
 

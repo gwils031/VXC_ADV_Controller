@@ -124,14 +124,19 @@ Windows registry between runs.
 | File | Contents |
 |------|----------|
 | `<timestamp>_merged.csv` | One row per ADV sample with matched VXC X/Y |
-| `<timestamp>_averaged.csv` | Row per ADV file, spatially averaged velocities |
-| `master_merged.csv` | All merged rows accumulated across the session, including per-sample turbulence terms (`u_prime_*`, squared terms, and `u_prime_x_u_prime_z`) |
-| `master_averaged.csv` | All averaged rows accumulated across the session, including `TI_x/y/z`, `TKE`, `u_prime_x_u_prime_z_cov`, freshwater `rho`, and `Reynolds tau_xz` |
+| `<timestamp>_averaged.csv` | One row per detected position segment in the ADV file (not strictly one row per file) |
+| `master_merged.csv` | All merged sample rows across the session, including per-sample turbulence terms plus traceability fields (`source_adv_file`, `segment_index`) |
+| `master_averaged.csv` | All segment-level averaged rows, including turbulence (`TI_x/y/z`, `TKE`, `u_prime_x_u_prime_z_cov`, `rho`, `Reynolds tau_xz`) and audit fields (`source_adv_file`, `segment_index`, `segment_start_utc`, `segment_end_utc`, `segment_sample_count`) |
 
 Every new averaged file triggers a **Live Data** tab update automatically.
 
 Turbulence metrics are calculated after timestamp merge and before averaged-row write,
-using corrected velocity components and Reynolds decomposition for each ADV file.
+using corrected velocity components and Reynolds decomposition for each detected
+position segment.
+
+Segmenting rule: matched samples are split when X or Y position changes by more
+than 5 mm between consecutive samples. This prevents multi-location files from
+being blended into a single averaged row and improves audit traceability.
 
 **Activity Log** — scrollable text log of merge results capped at 500 lines.
 

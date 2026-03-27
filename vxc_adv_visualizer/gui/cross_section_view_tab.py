@@ -25,10 +25,9 @@ from matplotlib import cm
 from matplotlib.colors import Normalize, LinearSegmentedColormap, TwoSlopeNorm
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QSizePolicy, QFileDialog, QComboBox,
+    QFrame, QSizePolicy, QFileDialog, QComboBox, QGroupBox,
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QSettings
 
 logger = logging.getLogger(__name__)
 
@@ -62,34 +61,47 @@ class CrossSectionViewTab(QWidget):
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # ── Top info bar ──────────────────────────────────────────────────────
-        info_bar = QFrame()
-        info_bar.setStyleSheet("""
+        # ── Unified top bar (context + metric columns) ───────────────────────
+        top_bar = QFrame()
+        top_bar.setStyleSheet("""
             QFrame {
-                background-color: #f8f9fa;
+                background-color: #f1f3f5;
                 border: 1px solid #dee2e6;
                 border-radius: 4px;
-                padding: 8px;
+            }
+            QGroupBox {
+                font-weight: 600;
+                color: #212529;
+                border: 1px solid #d6d9de;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 10px;
+                background-color: #fafbfc;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
             }
         """)
-        info_layout = QHBoxLayout(info_bar)
-        info_layout.setContentsMargins(12, 6, 12, 6)
+        top_layout = QVBoxLayout(top_bar)
+        top_layout.setContentsMargins(12, 8, 12, 8)
+        top_layout.setSpacing(6)
+
+        top_header = QHBoxLayout()
+        top_header.setSpacing(16)
 
         self.file_label = QLabel("File: (none)")
         self.file_label.setStyleSheet("color: #495057; font-weight: 500;")
-        info_layout.addWidget(self.file_label)
-
-        info_layout.addSpacing(20)
+        top_header.addWidget(self.file_label)
 
         self.points_label = QLabel("Points: 0")
         self.points_label.setStyleSheet("color: #495057; font-weight: 500;")
-        info_layout.addWidget(self.points_label)
-
-        info_layout.addSpacing(20)
+        top_header.addWidget(self.points_label)
 
         mode_label = QLabel("Color Mode:")
         mode_label.setStyleSheet("color: #495057; font-weight: 500;")
-        info_layout.addWidget(mode_label)
+        top_header.addWidget(mode_label)
 
         self.plot_mode_combo = QComboBox()
         self.plot_mode_combo.addItem("Velocity |V|", "velocity")
@@ -106,11 +118,18 @@ class CrossSectionViewTab(QWidget):
             }
         """)
         self.plot_mode_combo.currentIndexChanged.connect(self._on_plot_mode_changed)
-        info_layout.addWidget(self.plot_mode_combo)
+        top_header.addWidget(self.plot_mode_combo)
 
-        info_layout.addStretch()
+        top_header.addStretch()
 
-        # Import button — green
+        self.status_label = QLabel("READY")
+        self.status_label.setStyleSheet(
+            "background-color: #e9ecef; color: #6c757d; "
+            "font-size: 8pt; font-weight: 700; padding: 3px 8px; border-radius: 10px;"
+        )
+        self.status_label.setAlignment(Qt.AlignCenter)
+        top_header.addWidget(self.status_label)
+
         import_btn = QPushButton("📂 Import Session Data")
         import_btn.setToolTip("Open an averaged_grid_data.csv from a past session")
         import_btn.setStyleSheet("""
@@ -126,35 +145,126 @@ class CrossSectionViewTab(QWidget):
             QPushButton:pressed { background-color: #1e7e34; }
         """)
         import_btn.clicked.connect(self._import_session_data)
-        info_layout.addWidget(import_btn)
+        top_header.addWidget(import_btn)
 
-        info_layout.addSpacing(8)
-
-        # Reload button — blue
         reload_btn = QPushButton("↻ Reload")
         reload_btn.setToolTip("Re-read the current file from disk")
         reload_btn.setStyleSheet("""
             QPushButton {
-                background-color: #007bff;
+                background-color: #2f6fda;
                 color: white;
                 border: none;
                 border-radius: 4px;
                 padding: 6px 16px;
                 font-weight: 500;
             }
-            QPushButton:hover { background-color: #0056b3; }
-            QPushButton:pressed { background-color: #004085; }
+            QPushButton:hover { background-color: #255dbe; }
+            QPushButton:pressed { background-color: #1f4fa2; }
         """)
         reload_btn.clicked.connect(self._reload_last_file)
-        info_layout.addWidget(reload_btn)
+        top_header.addWidget(reload_btn)
 
-        main_layout.addWidget(info_bar)
+        top_layout.addLayout(top_header)
 
-        # ── Main content: 70 % plot / 30 % stats ─────────────────────────────
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(8)
+        hint_label = QLabel("Cross-section map below; columns show selected measurement details.")
+        hint_label.setStyleSheet("color: #6c757d; font-size: 9pt;")
+        top_layout.addWidget(hint_label)
 
-        # Left — plot frame
+        mono_style = """
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 6px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """
+
+        metric_row = QHBoxLayout()
+        metric_row.setSpacing(8)
+
+        position_box = QGroupBox("Position")
+        position_layout = QVBoxLayout(position_box)
+        position_layout.setContentsMargins(8, 8, 8, 8)
+        self.position_label = QLabel("Cross-Stream: -- m\nDepth:        -- m")
+        self.position_label.setStyleSheet(mono_style)
+        position_layout.addWidget(self.position_label)
+        metric_row.addWidget(position_box, 1)
+
+        flow_box = QGroupBox("Flow")
+        flow_layout = QVBoxLayout(flow_box)
+        flow_layout.setContentsMargins(8, 8, 8, 8)
+        self.vx_label = QLabel("Vx: -- m/s")
+        self.vx_label.setStyleSheet(mono_style)
+        flow_layout.addWidget(self.vx_label)
+        self.vy_vz_label = QLabel("Vy: -- m/s\nVz: -- m/s")
+        self.vy_vz_label.setStyleSheet(mono_style)
+        flow_layout.addWidget(self.vy_vz_label)
+        self.magnitude_label = QLabel("-- m/s")
+        self.magnitude_label.setStyleSheet("""
+            QLabel {
+                color: #007bff;
+                font-size: 14pt;
+                font-weight: bold;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 10px;
+                background-color: white;
+                border: 2px solid #007bff;
+                border-radius: 4px;
+                qproperty-alignment: AlignCenter;
+            }
+        """)
+        flow_layout.addWidget(self.magnitude_label)
+        metric_row.addWidget(flow_box, 1)
+
+        quality_box = QGroupBox("Quality")
+        quality_layout = QVBoxLayout(quality_box)
+        quality_layout.setContentsMargins(8, 8, 8, 8)
+        self.quality_label = QLabel("Corr: -- %\nSNR:  -- dB\nN:    --")
+        self.quality_label.setStyleSheet(mono_style)
+        quality_layout.addWidget(self.quality_label)
+        metric_row.addWidget(quality_box, 1)
+
+        turbulence_box = QGroupBox("Turbulence")
+        turbulence_layout = QVBoxLayout(turbulence_box)
+        turbulence_layout.setContentsMargins(8, 8, 8, 8)
+        self.turbulence_label = QLabel("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
+        self.turbulence_label.setStyleSheet(mono_style)
+        turbulence_layout.addWidget(self.turbulence_label)
+        metric_row.addWidget(turbulence_box, 1)
+
+        legend_box = QGroupBox("Plot Legend")
+        legend_layout = QVBoxLayout(legend_box)
+        legend_layout.setContentsMargins(8, 8, 8, 8)
+        self.legend_label = QLabel(
+            "Arrows = (Vy, Vz) direction\n"
+            "  length ∝ in-plane speed\n"
+            "  (Vx-only → collapses to dot)\n\n"
+            "Color  = Total speed |V|\n"
+            "  Red    = high magnitude\n"
+            "  Blue   = low magnitude\n"
+            "  (turbo colormap)"
+        )
+        self.legend_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 9pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        legend_layout.addWidget(self.legend_label)
+        metric_row.addWidget(legend_box, 1)
+
+        top_layout.addLayout(metric_row)
+        main_layout.addWidget(top_bar)
+
+        # ── Plot area ─────────────────────────────────────────────────────────
         plot_frame = QFrame()
         plot_frame.setFrameShape(QFrame.StyledPanel)
         plot_frame.setStyleSheet("""
@@ -181,139 +291,7 @@ class CrossSectionViewTab(QWidget):
 
         self.canvas.mpl_connect('button_press_event', self._on_plot_click)
 
-        content_layout.addWidget(plot_frame, 7)
-
-        # Right — stats panel
-        self.stats_panel = QFrame()
-        self.stats_panel.setFrameShape(QFrame.StyledPanel)
-        self.stats_panel.setStyleSheet("""
-            QFrame {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-            }
-        """)
-        self.stats_panel.setMinimumWidth(260)
-        self.stats_panel.setMaximumWidth(340)
-
-        stats_layout = QVBoxLayout(self.stats_panel)
-        stats_layout.setContentsMargins(12, 12, 12, 12)
-        stats_layout.setSpacing(6)
-
-        title_label = QLabel("Measurement Point")
-        title_font = QFont()
-        title_font.setPointSize(12)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #212529; padding-bottom: 6px;")
-        stats_layout.addWidget(title_label)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #dee2e6;")
-        stats_layout.addWidget(sep)
-
-        mono_style = """
-            QLabel {
-                color: #495057;
-                font-size: 10pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 6px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """
-        section_font = QFont()
-        section_font.setPointSize(10)
-        section_font.setBold(True)
-
-        def _section(text):
-            lbl = QLabel(text)
-            lbl.setFont(section_font)
-            lbl.setStyleSheet("color: #212529; padding-top: 6px;")
-            return lbl
-
-        # Position
-        stats_layout.addWidget(_section("Position"))
-        self.position_label = QLabel("Cross-Stream: -- m\nDepth:        -- m")
-        self.position_label.setStyleSheet(mono_style)
-        stats_layout.addWidget(self.position_label)
-
-        # Vx (downstream / out-of-plane)
-        stats_layout.addWidget(_section("Downstream Vx (out-of-plane)"))
-        self.vx_label = QLabel("Vx: -- m/s")
-        self.vx_label.setStyleSheet(mono_style)
-        stats_layout.addWidget(self.vx_label)
-
-        # Vy / Vz (cross-section arrows)
-        stats_layout.addWidget(_section("Cross-Section Vy, Vz (arrows)"))
-        self.vy_vz_label = QLabel("Vy: -- m/s\nVz: -- m/s")
-        self.vy_vz_label.setStyleSheet(mono_style)
-        stats_layout.addWidget(self.vy_vz_label)
-
-        # Total magnitude
-        stats_layout.addWidget(_section("Total Magnitude |V|"))
-        self.magnitude_label = QLabel("-- m/s")
-        self.magnitude_label.setStyleSheet("""
-            QLabel {
-                color: #007bff;
-                font-size: 14pt;
-                font-weight: bold;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 10px;
-                background-color: white;
-                border: 2px solid #007bff;
-                border-radius: 4px;
-                qproperty-alignment: AlignCenter;
-            }
-        """)
-        stats_layout.addWidget(self.magnitude_label)
-
-        # Quality metrics
-        stats_layout.addWidget(_section("Quality Metrics"))
-        self.quality_label = QLabel("Corr: -- %\nSNR:  -- dB\nN:    --")
-        self.quality_label.setStyleSheet(mono_style)
-        stats_layout.addWidget(self.quality_label)
-
-        # Turbulence metrics
-        stats_layout.addWidget(_section("Turbulence Metrics"))
-        self.turbulence_label = QLabel("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
-        self.turbulence_label.setStyleSheet(mono_style)
-        stats_layout.addWidget(self.turbulence_label)
-
-        # Plot legend (static reference box)
-        stats_layout.addWidget(_section("Plot Legend"))
-        self.legend_label = QLabel(
-            "Arrows = (Vy, Vz) direction\n"
-            "  length ∝ in-plane speed\n"
-            "  (Vx-only → collapses to dot)\n\n"
-            "Color  = Total speed |V|\n"
-            "  Red    = high magnitude\n"
-            "  Blue   = low magnitude\n"
-            "  (turbo colormap)"
-        )
-        self.legend_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 9pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.legend_label)
-
-        self.status_label = QLabel("● Click a point to inspect")
-        self.status_label.setStyleSheet("color: #6c757d; font-size: 9pt; padding-top: 4px;")
-        stats_layout.addWidget(self.status_label)
-
-        stats_layout.addStretch()
-
-        content_layout.addWidget(self.stats_panel, 3)
-        main_layout.addLayout(content_layout)
+        main_layout.addWidget(plot_frame, 1)
         self.setLayout(main_layout)
 
     # ─── Public API ──────────────────────────────────────────────────────────
@@ -335,7 +313,14 @@ class CrossSectionViewTab(QWidget):
 
     def _import_session_data(self):
         """Open a file dialog to select an averaged CSV from a past session."""
-        default_dir = Path(__file__).resolve().parents[2] / "Data_Output" / "sessions"
+        settings = QSettings("ADV-VXC", "VXC-ADV-Controller")
+        output_dir = settings.value("auto_merge/output_dir", "")
+
+        if output_dir:
+            default_dir = Path(str(output_dir)) / "sessions"
+        else:
+            default_dir = Path(__file__).resolve().parents[2] / "Data_Output" / "sessions"
+
         if not default_dir.exists():
             default_dir = Path.home()
 
@@ -622,8 +607,15 @@ class CrossSectionViewTab(QWidget):
                 self.colorbar.remove()
             except (AttributeError, ValueError):
                 pass
-        self.colorbar = self.figure.colorbar(quiv, ax=self.ax, label=colorbar_label, pad=0.02)
-        self.colorbar.ax.yaxis.label.set_color(_FG)
+        self.colorbar = self.figure.colorbar(
+            quiv,
+            ax=self.ax,
+            label=colorbar_label,
+            orientation='horizontal',
+            pad=0.08,
+            fraction=0.06,
+        )
+        self.colorbar.ax.xaxis.label.set_color(_FG)
         self.colorbar.ax.tick_params(colors=_FG, labelsize=9)
         self.colorbar.outline.set_edgecolor(_FG)
 
@@ -769,8 +761,11 @@ class CrossSectionViewTab(QWidget):
             f"Tau_xz: {tau_xz_str} Pa"
         )
 
-        self.status_label.setText("● Point selected")
-        self.status_label.setStyleSheet("color: #28a745; font-size: 9pt; padding-top: 4px;")
+        self.status_label.setText("POINT SELECTED")
+        self.status_label.setStyleSheet(
+            "background-color: #d1e7dd; color: #0f5132; "
+            "font-size: 8pt; font-weight: 700; padding: 3px 8px; border-radius: 10px;"
+        )
 
     # ─── Helpers ─────────────────────────────────────────────────────────────
 

@@ -52,38 +52,58 @@ class LiveDataTab(QWidget):
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # Top info bar
-        info_bar = QFrame()
-        info_bar.setStyleSheet("""
+        # Unified top bar: context row + metric columns
+        top_bar = QFrame()
+        top_bar.setStyleSheet("""
             QFrame {
-                background-color: #f8f9fa;
+                background-color: #f1f3f5;
                 border: 1px solid #dee2e6;
                 border-radius: 4px;
-                padding: 8px;
+            }
+            QGroupBox {
+                font-weight: 600;
+                color: #212529;
+                border: 1px solid #d6d9de;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 10px;
+                background-color: #fafbfc;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
             }
         """)
-        info_layout = QHBoxLayout(info_bar)
-        info_layout.setContentsMargins(12, 6, 12, 6)
+        top_layout = QVBoxLayout(top_bar)
+        top_layout.setContentsMargins(12, 8, 12, 8)
+        top_layout.setSpacing(6)
 
-        # File info
+        top_header = QHBoxLayout()
+        top_header.setSpacing(16)
+
         self.file_label = QLabel("Last file: (none)")
         self.file_label.setStyleSheet("color: #495057; font-weight: 500;")
-        info_layout.addWidget(self.file_label)
+        top_header.addWidget(self.file_label)
 
-        info_layout.addSpacing(20)
-
-        # Points counter
-        self.points_label = QLabel("Valid points: 0/0")
+        self.points_label = QLabel("Vector points: 0/0 valid")
         self.points_label.setStyleSheet("color: #495057; font-weight: 500;")
-        info_layout.addWidget(self.points_label)
+        top_header.addWidget(self.points_label)
 
-        info_layout.addStretch()
+        top_header.addStretch()
 
-        # Refresh button
+        self.status_label = QLabel("WAITING")
+        self.status_label.setStyleSheet(
+            "background-color: #e9ecef; color: #6c757d; "
+            "font-size: 8pt; font-weight: 700; padding: 3px 8px; border-radius: 10px;"
+        )
+        self.status_label.setAlignment(Qt.AlignCenter)
+        top_header.addWidget(self.status_label)
+
         refresh_btn = QPushButton("↻ Reload")
         refresh_btn.setStyleSheet("""
             QPushButton {
-                background-color: #007bff;
+                background-color: #2f6fda;
                 color: white;
                 border: none;
                 border-radius: 4px;
@@ -91,22 +111,163 @@ class LiveDataTab(QWidget):
                 font-weight: 500;
             }
             QPushButton:hover {
-                background-color: #0056b3;
+                background-color: #255dbe;
             }
             QPushButton:pressed {
-                background-color: #004085;
+                background-color: #1f4fa2;
             }
         """)
         refresh_btn.clicked.connect(self._reload_last_file)
-        info_layout.addWidget(refresh_btn)
+        top_header.addWidget(refresh_btn)
+        top_layout.addLayout(top_header)
 
-        main_layout.addWidget(info_bar)
+        self.scope_hint_label = QLabel("Map: all valid averaged locations. Columns below: latest averaged location snapshot.")
+        self.scope_hint_label.setStyleSheet("color: #6c757d; font-size: 9pt;")
+        top_layout.addWidget(self.scope_hint_label)
 
-        # Main content: Split layout (70% plot, 30% stats)
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(8)
+        columns_row = QHBoxLayout()
+        columns_row.setSpacing(8)
 
-        # Left: Plot area (70% width)
+        position_box = QGroupBox("Position")
+        position_layout = QVBoxLayout(position_box)
+        position_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.position_label = QLabel("X: -- m\nY: -- m")
+        self.position_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 11pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        position_layout.addWidget(self.position_label)
+        columns_row.addWidget(position_box, 1)
+
+        flow_box = QGroupBox("Flow")
+        flow_layout = QVBoxLayout(flow_box)
+        flow_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.velocity_label = QLabel("X: -- m/s\nY: -- m/s\nZ: -- m/s")
+        self.velocity_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 11pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        flow_layout.addWidget(self.velocity_label)
+
+        self.magnitude_label = QLabel("-- m/s")
+        self.magnitude_label.setStyleSheet("""
+            QLabel {
+                color: #007bff;
+                font-size: 14pt;
+                font-weight: bold;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 12px;
+                background-color: white;
+                border: 2px solid #007bff;
+                border-radius: 4px;
+                qproperty-alignment: AlignCenter;
+            }
+        """)
+        flow_layout.addWidget(self.magnitude_label)
+
+        self.sample_label = QLabel("Samples: --")
+        self.sample_label.setStyleSheet("""
+            QLabel {
+                color: #6c757d;
+                font-size: 9pt;
+                padding-top: 4px;
+                qproperty-alignment: AlignCenter;
+            }
+        """)
+        flow_layout.addWidget(self.sample_label)
+        columns_row.addWidget(flow_box, 1)
+
+        quality_box = QGroupBox("Signal Quality")
+        quality_layout = QVBoxLayout(quality_box)
+        quality_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.correlation_label = QLabel("Avg: -- %")
+        self.correlation_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        quality_layout.addWidget(self.correlation_label)
+
+        self.snr_label = QLabel("Avg: -- dB")
+        self.snr_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        quality_layout.addWidget(self.snr_label)
+        columns_row.addWidget(quality_box, 1)
+
+        environment_box = QGroupBox("Environment")
+        environment_layout = QVBoxLayout(environment_box)
+        environment_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.pressure_label = QLabel("Raw:   -- dbar\nGauge: -- dbar")
+        self.pressure_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        environment_layout.addWidget(self.pressure_label)
+        columns_row.addWidget(environment_box, 1)
+
+        turbulence_box = QGroupBox("Turbulence")
+        turbulence_layout = QVBoxLayout(turbulence_box)
+        turbulence_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.turbulence_label = QLabel("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
+        self.turbulence_label.setStyleSheet("""
+            QLabel {
+                color: #495057;
+                font-size: 10pt;
+                font-family: 'Consolas', 'Courier New', monospace;
+                padding: 8px;
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+            }
+        """)
+        turbulence_layout.addWidget(self.turbulence_label)
+        columns_row.addWidget(turbulence_box, 1)
+
+        top_layout.addLayout(columns_row)
+        main_layout.addWidget(top_bar)
+
+        # Plot area
         plot_frame = QFrame()
         plot_frame.setFrameShape(QFrame.StyledPanel)
         plot_frame.setStyleSheet("""
@@ -127,203 +288,7 @@ class LiveDataTab(QWidget):
         self.ax = self.figure.add_subplot(111)
         self._draw_placeholder("No data loaded")
         plot_layout.addWidget(self.canvas)
-
-        content_layout.addWidget(plot_frame, 7)  # 70% weight
-
-        # Right: Stats panel (30% width)
-        self.stats_panel = QFrame()
-        self.stats_panel.setFrameShape(QFrame.StyledPanel)
-        self.stats_panel.setStyleSheet("""
-            QFrame {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-            }
-        """)
-        self.stats_panel.setMinimumWidth(280)
-        self.stats_panel.setMaximumWidth(350)
-        
-        stats_layout = QVBoxLayout(self.stats_panel)
-        stats_layout.setContentsMargins(12, 12, 12, 12)
-        stats_layout.setSpacing(8)
-
-        # Stats title
-        stats_title = QLabel("Latest Location Data")
-        title_font = QFont()
-        title_font.setPointSize(12)
-        title_font.setBold(True)
-        stats_title.setFont(title_font)
-        stats_title.setStyleSheet("color: #212529; padding-bottom: 8px;")
-        stats_layout.addWidget(stats_title)
-
-        # Separator
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("background-color: #dee2e6;")
-        stats_layout.addWidget(separator)
-
-        # Position display
-        self.position_label = QLabel("X: -- m\nY: -- m")
-        self.position_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 11pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.position_label)
-
-        # Velocity section
-        vel_label = QLabel("Averaged Velocities")
-        vel_font = QFont()
-        vel_font.setPointSize(10)
-        vel_font.setBold(True)
-        vel_label.setFont(vel_font)
-        vel_label.setStyleSheet("color: #212529; padding-top: 8px;")
-        stats_layout.addWidget(vel_label)
-
-        self.velocity_label = QLabel("X: -- m/s\nY: -- m/s\nZ: -- m/s")
-        self.velocity_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 11pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.velocity_label)
-
-        # Magnitude
-        mag_label = QLabel("Magnitude")
-        mag_label.setFont(vel_font)
-        mag_label.setStyleSheet("color: #212529; padding-top: 8px;")
-        stats_layout.addWidget(mag_label)
-
-        self.magnitude_label = QLabel("-- m/s")
-        self.magnitude_label.setStyleSheet("""
-            QLabel {
-                color: #007bff;
-                font-size: 14pt;
-                font-weight: bold;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 12px;
-                background-color: white;
-                border: 2px solid #007bff;
-                border-radius: 4px;
-                qproperty-alignment: AlignCenter;
-            }
-        """)
-        stats_layout.addWidget(self.magnitude_label)
-
-        # Sample count
-        self.sample_label = QLabel("Samples: --")
-        self.sample_label.setStyleSheet("""
-            QLabel {
-                color: #6c757d;
-                font-size: 9pt;
-                padding-top: 8px;
-                qproperty-alignment: AlignCenter;
-            }
-        """)
-        stats_layout.addWidget(self.sample_label)
-
-        # Correlation section
-        corr_label = QLabel("Correlation Scores")
-        corr_label.setFont(vel_font)
-        corr_label.setStyleSheet("color: #212529; padding-top: 8px;")
-        stats_layout.addWidget(corr_label)
-
-        self.correlation_label = QLabel("Avg: -- %")
-        self.correlation_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 10pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.correlation_label)
-
-        # SNR section
-        snr_label = QLabel("Signal-to-Noise Ratio")
-        snr_label.setFont(vel_font)
-        snr_label.setStyleSheet("color: #212529; padding-top: 8px;")
-        stats_layout.addWidget(snr_label)
-
-        self.snr_label = QLabel("Avg: -- dB")
-        self.snr_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 10pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.snr_label)
-
-        # Pressure section
-        pressure_label = QLabel("Pressure")
-        pressure_label.setFont(vel_font)
-        pressure_label.setStyleSheet("color: #212529; padding-top: 8px;")
-        stats_layout.addWidget(pressure_label)
-
-        self.pressure_label = QLabel("Raw:   -- dbar\nGauge: -- dbar")
-        self.pressure_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 10pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.pressure_label)
-
-        # Turbulence section
-        turb_label = QLabel("Turbulence")
-        turb_label.setFont(vel_font)
-        turb_label.setStyleSheet("color: #212529; padding-top: 8px;")
-        stats_layout.addWidget(turb_label)
-
-        self.turbulence_label = QLabel("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
-        self.turbulence_label.setStyleSheet("""
-            QLabel {
-                color: #495057;
-                font-size: 10pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                padding: 8px;
-                background-color: white;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-            }
-        """)
-        stats_layout.addWidget(self.turbulence_label)
-
-        # Status indicator
-        self.status_label = QLabel("● Waiting for data")
-        self.status_label.setStyleSheet("color: #6c757d; font-size: 9pt; padding-top: 4px;")
-        stats_layout.addWidget(self.status_label)
-
-        stats_layout.addStretch()
-
-        content_layout.addWidget(self.stats_panel, 3)  # 30% weight
-
-        main_layout.addLayout(content_layout)
+        main_layout.addWidget(plot_frame, 1)
 
         self.setLayout(main_layout)
 
@@ -547,7 +512,14 @@ class LiveDataTab(QWidget):
                 self.colorbar.remove()
             except (AttributeError, ValueError):
                 pass
-        self.colorbar = self.figure.colorbar(scatter, ax=self.ax, label="Speed (m/s)", pad=0.02)
+        self.colorbar = self.figure.colorbar(
+            scatter,
+            ax=self.ax,
+            label="Speed (m/s)",
+            orientation="horizontal",
+            pad=0.08,
+            fraction=0.06,
+        )
 
         # Add current position marker as black dot (10px diameter)
         if self.current_position_m:
@@ -559,9 +531,9 @@ class LiveDataTab(QWidget):
         if self.last_stats:
             total_points = self.last_stats.get("avg_points_total", 0)
             valid_points = self.last_stats.get("avg_points_valid", 0)
-            self.points_label.setText(f"Valid points: {valid_points}/{total_points}")
+            self.points_label.setText(f"Vector points: {valid_points}/{total_points} valid")
         else:
-            self.points_label.setText(f"Valid points: {len(x_arr)}/{len(x_arr)}")
+            self.points_label.setText(f"Vector points: {len(x_arr)}/{len(x_arr)} valid")
 
         self.file_label.setText(f"Last file: {Path(self.last_avg_file).name}")
         self.canvas.draw_idle()
@@ -667,8 +639,11 @@ class LiveDataTab(QWidget):
             self.snr_label.setText("Beam1: N/A\nBeam2: N/A\nBeam3: N/A\nAvg: -- dB")
             self.pressure_label.setText("Raw:   -- dbar\nGauge: -- dbar")
             self.turbulence_label.setText("TIx: -- m/s\nTIy: -- m/s\nTIz: -- m/s\nTKE: -- m2/s2\nTau_xz: -- Pa")
-            self.status_label.setText("● No data at position")
-            self.status_label.setStyleSheet("color: #dc3545; font-size: 9pt; padding-top: 4px;")
+            self.status_label.setText("NO DATA")
+            self.status_label.setStyleSheet(
+                "background-color: #f8d7da; color: #842029; "
+                "font-size: 8pt; font-weight: 700; padding: 3px 8px; border-radius: 10px;"
+            )
             return
 
         # Extract velocity components
@@ -774,8 +749,11 @@ class LiveDataTab(QWidget):
             f"Tau_xz: {tau_xz_str} Pa"
         )
 
-        self.status_label.setText("● Data available")
-        self.status_label.setStyleSheet("color: #28a745; font-size: 9pt; padding-top: 4px;")
+        self.status_label.setText("LIVE")
+        self.status_label.setStyleSheet(
+            "background-color: #d1e7dd; color: #0f5132; "
+            "font-size: 8pt; font-weight: 700; padding: 3px 8px; border-radius: 10px;"
+        )
 
     def _find_point_data(self, filepath: Path, position: Tuple[float, float]) -> Optional[dict]:
         """Find data for a specific position from the averaged CSV."""
