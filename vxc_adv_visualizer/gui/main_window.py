@@ -188,22 +188,17 @@ class VXCLogWorker(QObject):
                     self.logger.log_position(x_steps=x, y_steps=y, quality="GOOD")
                     consecutive_errors = 0  # Reset error counter on success
                 else:
-                    # VXC not responding - log (0,0) to maintain timeline
-                    logger.warning("VXC position unavailable, logging (0,0)")
-                    self.logger.log_position(x_steps=0, y_steps=0, quality="VXC Moving")
+                    # VXC not responding - do not inject false origin (0, 0)
                     consecutive_errors += 1
+                    logger.warning(
+                        f"VXC position unavailable (#{consecutive_errors}/{max_consecutive_errors}), skipping sample"
+                    )
                     
             except Exception as e:
                 consecutive_errors += 1
                 error_msg = f"VXC logging error (#{consecutive_errors}): {e}"
                 logger.error(error_msg)
                 self.error.emit(error_msg)
-                
-                # Try to log error position to maintain timeline
-                try:
-                    self.logger.log_position(x_steps=0, y_steps=0, quality="VXC Moving")
-                except:
-                    pass
                 
                 # If too many consecutive errors, stop logging
                 if consecutive_errors >= max_consecutive_errors:

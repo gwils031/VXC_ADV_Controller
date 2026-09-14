@@ -1,5 +1,52 @@
+base_sampling_duration_sec: 10.0
+froude_threshold: 1.0
+grid:
+  x_spacing_feet: 0.1
+  y_spacing_feet: 0.05
+max_sampling_duration_sec: 20.0
+
+# Workspace boundaries (motor steps)
+# These are calibrated using the "Calibrate Workspace Bounds" feature
+# Default values match historical hard-coded limits
 boundaries:
   x_min_steps: 0
-  x_max_steps: 165661
+  x_max_steps: 165654  # ~1.052 m
   y_min_steps: 0
-  y_max_steps: 57601
+  y_max_steps: 57651   # ~0.366 m
+
+# Environmental calibration
+environment:
+  # Atmospheric pressure at measurement site in dbar
+  # Provo, Utah (elevation ~4551 ft / 1387 m): ~8.5 dbar
+  # Sea level: ~10.1325 dbar
+  atmospheric_pressure_dbar: 8.5
+
+# Probe mounting orientation angles (degrees)
+# Corrects for probe mounting pitch/roll/yaw misalignment relative to flume
+probe_orientation:
+  roll_deg: 0.0   # Rotation around X axis (streamwise)
+  pitch_deg: 0.0  # Rotation around Y axis (transverse)
+  yaw_deg: 0.0    # Rotation around Z axis (vertical)
+
+# Doppler noise floor correction (Voulgaris & Trowbridge 1998)
+doppler_noise:
+  enabled: true
+  min_samples: 32  # Minimum segment length required for spectral plateau estimation
+  high_freq_fraction: 0.25
+
+# Cross-section automation defaults
+automation:
+  default_dwell_time_sec: 60.0
+  movement_settling_time_sec: 2.0
+  default_vertical_points: 10
+  default_horizontal_points: 15
+  default_grid_x_points: 10
+  default_grid_y_points: 8
+
+# Session management configuration
+sessions:
+  base_output_dir: "Data_Output"
+  auto_create_on_start: true
+  archive_raw_exports: true
+  generate_plots: false  # Future feature
+  default_operator: ""

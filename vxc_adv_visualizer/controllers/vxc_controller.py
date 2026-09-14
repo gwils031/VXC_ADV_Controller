@@ -378,18 +378,18 @@ class VXCController:
             y: Target Y position in steps
         """
         if x is not None:
-            current_x = self.get_position(motor=1)
+            current_x = self.get_position(motor=2)
             if current_x is not None:
                 dx = int(x - current_x)
                 if dx != 0:
-                    self.step_motor(motor=1, steps=dx)
+                    self.step_motor(motor=2, steps=dx)
         
         if y is not None:
-            current_y = self.get_position(motor=2)
+            current_y = self.get_position(motor=1)
             if current_y is not None:
                 dy = int(y - current_y)
                 if dy != 0:
-                    self.step_motor(motor=2, steps=dy)
+                    self.step_motor(motor=1, steps=dy)
     
     def jog_to(self, target_x: int, target_y: int, speed: int = 2000, acceleration: int = 2) -> bool:
         """Jog to target position: X axis first, then Y axis.

@@ -19,6 +19,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
+from ..data.location_aggregation import aggregate_location_rows
+
 logger = logging.getLogger(__name__)
 
 
@@ -381,61 +383,10 @@ class LiveDataTab(QWidget):
         return aggregated_rows
 
     def _aggregate_location_rows(self, rows: List[dict], x_loc: float, y_loc: float) -> dict:
-        """Aggregate multiple measurements at the same location.
-        
-        Combines sample counts and computes weighted averages of velocity
-        and quality metrics across all measurements at this location.
-        """
-        # Sum total sample count across all measurements
-        total_samples = sum(int(row.get('sample_count', 0)) for row in rows)
-        
-        # Weighted average of velocities and metrics
-        velocity_keys = [
-            'Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
-            'Corrected Velocity.X (m/s)', 'Corrected Velocity.Y (m/s)', 'Corrected Velocity.Z (m/s)'
-        ]
-        
-        quality_keys = ['Correlation.Avg (%)', 'SNR.Avg (dB)']
-        env_keys = [
-            'Temperature (°C)', 'Raw Pressure (dbar)', 'Gauge Pressure (dbar)',
-            'Corrected Pressure (dbar)', 'Depth (m)', 'Voltage (V)'
-        ]
-        turbulence_keys = [
-            'TI_x (m/s)', 'TI_y (m/s)', 'TI_z (m/s)',
-            'TKE (m2/s2)', 'u_prime_x_u_prime_z_cov (m2/s2)',
-            'rho_freshwater (kg/m3)', 'Reynolds tau_xz (Pa)'
-        ]
-        
-        aggregated = {
-            'x_m': f"{x_loc:.6f}",
-            'y_m': f"{y_loc:.6f}",
-            'sample_count': str(total_samples),
-            'quality_flag': 'OK',  # All rows in this group passed quality filter
-            'measurement_count': str(len(rows))  # Track how many measurements combined
-        }
-        
-        # Weighted average for each numeric field
-        for key in velocity_keys + quality_keys + env_keys + turbulence_keys:
-            values_and_weights = []
-            for row in rows:
-                val = self._parse_float(row.get(key))
-                weight = int(row.get('sample_count', 0))
-                if val is not None and weight > 0:
-                    values_and_weights.append((val, weight))
-            
-            if values_and_weights:
-                # Weighted average: sum(value * weight) / sum(weight)
-                weighted_sum = sum(v * w for v, w in values_and_weights)
-                total_weight = sum(w for v, w in values_and_weights)
-                aggregated[key] = f"{weighted_sum / total_weight:.6f}"
-        
-        # Use timestamp from most recent measurement
-        if 'timestamp_utc' in rows[-1]:
-            aggregated['timestamp_utc'] = rows[-1]['timestamp_utc']
-        
+        """Aggregate multiple measurements at the same location (Law of Total Variance)."""
+        aggregated = aggregate_location_rows(rows, x_loc, y_loc)
         logger.debug(f"Aggregated {len(rows)} measurements at ({x_loc:.3f}, {y_loc:.3f}) "
-                    f"with {total_samples} total samples")
-        
+                    f"with {aggregated.get('sample_count', 0)} total samples")
         return aggregated
     
     def _plot_vectors(self, rows: List[dict]):

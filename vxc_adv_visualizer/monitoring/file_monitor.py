@@ -12,6 +12,9 @@ from PyQt5.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, QThrea
 
 from ..data.adv_vxc_merger import ADVVXCMerger
 from ..data.session_manager import SessionConfig
+from ..data.pst_despike import pst_despike
+from ..data.probe_transform import transform_velocity_vectors, load_probe_orientation
+from ..data.doppler_noise import estimate_doppler_noise_floor, correct_turbulence_variances, load_doppler_noise_config
 from .vxc_matcher import VXCLogMatcher
 
 logger = logging.getLogger(__name__)
@@ -57,10 +60,8 @@ class MergeWorkerThread(QThread):
             if None in (prev_x, prev_y, x, y):
                 should_split = True
             else:
-                should_split = (
-                    abs(x - prev_x) > self.POSITION_SEGMENT_TOLERANCE_M
-                    or abs(y - prev_y) > self.POSITION_SEGMENT_TOLERANCE_M
-                )
+                dist = math.hypot(x - prev_x, y - prev_y)
+                should_split = dist > self.POSITION_SEGMENT_TOLERANCE_M
 
             if should_split:
                 segments.append([sample])
@@ -87,19 +88,6 @@ class MergeWorkerThread(QThread):
         first = segment_samples[0]
         last = segment_samples[-1]
 
-        avg_data_dict['source_adv_file'] = source_adv_file
-        avg_data_dict['segment_index'] = segment_index
-        avg_data_dict['segment_count'] = segment_count
-        avg_data_dict['segment_start_utc'] = self._get_sample_timestamp(first)
-        avg_data_dict['segment_end_utc'] = self._get_sample_timestamp(last)
-        avg_data_dict['segment_sample_count'] = len(segment_samples)
-        avg_data_dict['x_m'] = first.get('x_m')
-        avg_data_dict['y_m'] = first.get('y_m')
-        avg_data_dict['segment_anchor_x_m'] = first.get('x_m')
-        avg_data_dict['segment_anchor_y_m'] = first.get('y_m')
-        avg_data_dict['timestamp_utc'] = self._get_sample_timestamp(first)
-        avg_data_dict['sample_count'] = len(segment_samples)
-
         def _safe_floats(samples, key):
             result = []
             for s in samples:
@@ -107,6 +95,22 @@ class MergeWorkerThread(QThread):
                 if v is not None:
                     result.append(v)
             return result
+
+        x_vals = _safe_floats(segment_samples, 'x_m')
+        y_vals = _safe_floats(segment_samples, 'y_m')
+
+        avg_data_dict['source_adv_file'] = source_adv_file
+        avg_data_dict['segment_index'] = segment_index
+        avg_data_dict['segment_count'] = segment_count
+        avg_data_dict['segment_start_utc'] = self._get_sample_timestamp(first)
+        avg_data_dict['segment_end_utc'] = self._get_sample_timestamp(last)
+        avg_data_dict['segment_sample_count'] = len(segment_samples)
+        avg_data_dict['x_m'] = (sum(x_vals) / len(x_vals)) if x_vals else first.get('x_m')
+        avg_data_dict['y_m'] = (sum(y_vals) / len(y_vals)) if y_vals else first.get('y_m')
+        avg_data_dict['segment_anchor_x_m'] = first.get('x_m')
+        avg_data_dict['segment_anchor_y_m'] = first.get('y_m')
+        avg_data_dict['timestamp_utc'] = self._get_sample_timestamp(first)
+        avg_data_dict['sample_count'] = len(segment_samples)
 
         for key in [
             'Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
@@ -148,19 +152,65 @@ class MergeWorkerThread(QThread):
         uy_vals = _safe_floats(segment_samples, 'Corrected Velocity.Y (m/s)')
         uz_vals = _safe_floats(segment_samples, 'Corrected Velocity.Z (m/s)')
 
-        ux_mean = (sum(ux_vals) / len(ux_vals)) if ux_vals else None
-        uy_mean = (sum(uy_vals) / len(uy_vals)) if uy_vals else None
-        uz_mean = (sum(uz_vals) / len(uz_vals)) if uz_vals else None
+        # Phase-Space Thresholding (PST) despiking (Goring & Nikora 2002 / Wahl 2003)
+        # Applied to dwell segments with N >= 10 samples
+        spikes_x, spikes_y, spikes_z = 0, 0, 0
+        ux_clean, uy_clean, uz_clean = ux_vals, uy_vals, uz_vals
+        if len(ux_vals) >= 10:
+            res_x = pst_despike(ux_vals)
+            ux_clean = res_x.cleaned.tolist()
+            spikes_x = res_x.spike_count
+        if len(uy_vals) >= 10:
+            res_y = pst_despike(uy_vals)
+            uy_clean = res_y.cleaned.tolist()
+            spikes_y = res_y.spike_count
+        if len(uz_vals) >= 10:
+            res_z = pst_despike(uz_vals)
+            uz_clean = res_z.cleaned.tolist()
+            spikes_z = res_z.spike_count
+
+        avg_data_dict['despike_spikes_x'] = spikes_x
+        avg_data_dict['despike_spikes_y'] = spikes_y
+        avg_data_dict['despike_spikes_z'] = spikes_z
+
+        # Probe mounting misalignment transformation (Tait-Bryan Euler angles)
+        roll_deg, pitch_deg, yaw_deg = load_probe_orientation()
+        if (roll_deg != 0.0 or pitch_deg != 0.0 or yaw_deg != 0.0) and ux_clean and uy_clean and uz_clean:
+            ux_clean, uy_clean, uz_clean = transform_velocity_vectors(
+                ux_clean, uy_clean, uz_clean, roll_deg, pitch_deg, yaw_deg
+            )
+
+        ux_mean = (sum(ux_clean) / len(ux_clean)) if ux_clean else None
+        uy_mean = (sum(uy_clean) / len(uy_clean)) if uy_clean else None
+        uz_mean = (sum(uz_clean) / len(uz_clean)) if uz_clean else None
+
+        if ux_mean is not None:
+            avg_data_dict['Corrected Velocity.X (m/s)'] = ux_mean
+        if uy_mean is not None:
+            avg_data_dict['Corrected Velocity.Y (m/s)'] = uy_mean
+        if uz_mean is not None:
+            avg_data_dict['Corrected Velocity.Z (m/s)'] = uz_mean
 
         ux2_terms: List[float] = []
         uy2_terms: List[float] = []
         uz2_terms: List[float] = []
         uxuz_terms: List[float] = []
 
-        for s in segment_samples:
-            ux = merger._parse_float(s.get('Corrected Velocity.X (m/s)'))
-            uy = merger._parse_float(s.get('Corrected Velocity.Y (m/s)'))
-            uz = merger._parse_float(s.get('Corrected Velocity.Z (m/s)'))
+        all_cleaned = (
+            len(ux_clean) == len(segment_samples)
+            and len(uy_clean) == len(segment_samples)
+            and len(uz_clean) == len(segment_samples)
+        )
+
+        for idx, s in enumerate(segment_samples):
+            if all_cleaned:
+                ux = ux_clean[idx]
+                uy = uy_clean[idx]
+                uz = uz_clean[idx]
+            else:
+                ux = merger._parse_float(s.get('Corrected Velocity.X (m/s)'))
+                uy = merger._parse_float(s.get('Corrected Velocity.Y (m/s)'))
+                uz = merger._parse_float(s.get('Corrected Velocity.Z (m/s)'))
 
             if ux is not None and ux_mean is not None:
                 upx = ux - ux_mean
@@ -189,15 +239,40 @@ class MergeWorkerThread(QThread):
         var_y = (sum(uy2_terms) / len(uy2_terms)) if uy2_terms else None
         var_z = (sum(uz2_terms) / len(uz2_terms)) if uz2_terms else None
 
+        # Doppler noise floor estimation and correction (Voulgaris & Trowbridge 1998)
+        dn_cfg = load_doppler_noise_config()
+        noise_var_x, noise_var_y, noise_var_z = 0.0, 0.0, 0.0
+        if dn_cfg.get('enabled', True):
+            dn_min_n = dn_cfg.get('min_samples', 32)
+            dn_frac = dn_cfg.get('high_freq_fraction', 0.25)
+            if ux_clean and len(ux_clean) >= dn_min_n:
+                noise_var_x = estimate_doppler_noise_floor(ux_clean, fs=10.0, high_freq_fraction=dn_frac, min_samples=dn_min_n)
+            if uy_clean and len(uy_clean) >= dn_min_n:
+                noise_var_y = estimate_doppler_noise_floor(uy_clean, fs=10.0, high_freq_fraction=dn_frac, min_samples=dn_min_n)
+            if uz_clean and len(uz_clean) >= dn_min_n:
+                noise_var_z = estimate_doppler_noise_floor(uz_clean, fs=10.0, high_freq_fraction=dn_frac, min_samples=dn_min_n)
+
+        avg_data_dict['noise_var_x (m2/s2)'] = noise_var_x
+        avg_data_dict['noise_var_y (m2/s2)'] = noise_var_y
+        avg_data_dict['noise_var_z (m2/s2)'] = noise_var_z
+
+        var_x_clean, var_y_clean, var_z_clean, tke_clean = correct_turbulence_variances(
+            var_x, var_y, var_z, noise_var_x, noise_var_y, noise_var_z
+        )
+
         if var_x is not None:
-            avg_data_dict['TI_x (m/s)'] = math.sqrt(var_x)
-        if var_y is not None:
-            avg_data_dict['TI_y (m/s)'] = math.sqrt(var_y)
-        if var_z is not None:
-            avg_data_dict['TI_z (m/s)'] = math.sqrt(var_z)
+            avg_data_dict['TI_x_raw (m/s)'] = math.sqrt(var_x)
+        if var_x_clean is not None:
+            avg_data_dict['TI_x (m/s)'] = math.sqrt(var_x_clean)
+        if var_y_clean is not None:
+            avg_data_dict['TI_y (m/s)'] = math.sqrt(var_y_clean)
+        if var_z_clean is not None:
+            avg_data_dict['TI_z (m/s)'] = math.sqrt(var_z_clean)
 
         if var_x is not None and var_y is not None and var_z is not None:
-            avg_data_dict['TKE (m2/s2)'] = 0.5 * (var_x + var_y + var_z)
+            avg_data_dict['TKE_raw (m2/s2)'] = 0.5 * (var_x + var_y + var_z)
+        if tke_clean is not None:
+            avg_data_dict['TKE (m2/s2)'] = tke_clean
 
         cov_ux_uz = (sum(uxuz_terms) / len(uxuz_terms)) if uxuz_terms else None
         if cov_ux_uz is not None:
@@ -234,6 +309,18 @@ class MergeWorkerThread(QThread):
             return None
         return sum(values) / len(values)
 
+    @staticmethod
+    def _sample_beam_min(merger: ADVVXCMerger, sample: Dict, prefix: str) -> Optional[float]:
+        """Return the minimum value across all 3 acoustic beams (USGS TM 3-A4 standard)."""
+        values: List[float] = []
+        for i in range(1, 4):
+            val = merger._parse_float(sample.get(prefix.format(i)))
+            if val is not None:
+                values.append(val)
+        if not values:
+            return None
+        return min(values)
+
     def _sample_passes_filter_gates(
         self,
         merger: ADVVXCMerger,
@@ -241,12 +328,17 @@ class MergeWorkerThread(QThread):
         min_corr_avg_pct: float,
         min_snr_avg_db: float,
     ) -> bool:
-        """Apply per-sample correlation/SNR thresholds before filtered averaging."""
-        corr_avg = self._sample_beam_average(merger, sample, 'Correlation Score.Beam{} (%)')
-        snr_avg = self._sample_beam_average(merger, sample, 'SNR.Beam{} (dB)')
-        if corr_avg is None or snr_avg is None:
+        """Apply per-sample correlation/SNR thresholds before filtered averaging.
+
+        Per USGS TM 3-A4 and SonTek ADV specifications, 3D velocity reconstruction
+        requires all three acoustic receiver beams to satisfy quality thresholds:
+        min(c1, c2, c3) >= threshold and min(snr1, snr2, snr3) >= threshold.
+        """
+        corr_min = self._sample_beam_min(merger, sample, 'Correlation Score.Beam{} (%)')
+        snr_min = self._sample_beam_min(merger, sample, 'SNR.Beam{} (dB)')
+        if corr_min is None or snr_min is None:
             return False
-        return corr_avg >= min_corr_avg_pct and snr_avg >= min_snr_avg_db
+        return corr_min >= min_corr_avg_pct and snr_min >= min_snr_avg_db
 
     def run(self):
         """Execute merge operation in background thread.

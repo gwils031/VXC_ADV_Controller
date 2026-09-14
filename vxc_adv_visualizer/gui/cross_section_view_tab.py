@@ -29,6 +29,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSettings
 
+from ..data.location_aggregation import aggregate_location_rows
+
 logger = logging.getLogger(__name__)
 
 
@@ -403,35 +405,8 @@ class CrossSectionViewTab(QWidget):
         return aggregated
 
     def _aggregate_location_rows(self, rows: List[dict], x_loc: float, y_loc: float) -> dict:
-        """Weighted-average velocity + quality metrics for duplicate locations."""
-        total_samples = sum(int(row.get('sample_count', 0)) for row in rows)
-        avg_keys = [
-            'Raw Velocity.X (m/s)', 'Raw Velocity.Y (m/s)', 'Raw Velocity.Z (m/s)',
-            'Corrected Velocity.X (m/s)', 'Corrected Velocity.Y (m/s)', 'Corrected Velocity.Z (m/s)',
-            'Correlation.Avg (%)', 'SNR.Avg (dB)',
-            'TI_x (m/s)', 'TI_y (m/s)', 'TI_z (m/s)',
-            'TKE (m2/s2)', 'u_prime_x_u_prime_z_cov (m2/s2)',
-            'rho_freshwater (kg/m3)', 'Reynolds tau_xz (Pa)',
-        ]
-        result: dict = {
-            'x_m': f"{x_loc:.6f}",
-            'y_m': f"{y_loc:.6f}",
-            'sample_count': str(total_samples),
-            'quality_flag': 'GOOD',
-            'measurement_count': str(len(rows)),
-        }
-        for key in avg_keys:
-            vw_pairs = []
-            for row in rows:
-                val = self._parse_float(row.get(key))
-                w = int(row.get('sample_count', 0))
-                if val is not None and w > 0:
-                    vw_pairs.append((val, w))
-            if vw_pairs:
-                wsum = sum(v * w for v, w in vw_pairs)
-                total_w = sum(w for _, w in vw_pairs)
-                result[key] = f"{wsum / total_w:.6f}"
-        return result
+        """Aggregate velocity + quality + turbulence metrics for duplicate locations (Law of Total Variance)."""
+        return aggregate_location_rows(rows, x_loc, y_loc)
 
     # ─── Plotting ────────────────────────────────────────────────────────────
 
@@ -537,23 +512,21 @@ class CrossSectionViewTab(QWidget):
         spatial_scale = max(x_range, y_range, 0.1)
         max_in_plane = float(np.max(in_plane_mag)) if float(np.max(in_plane_mag)) > 1e-9 else 1.0
 
-        # ── Remap arrow lengths into a visible bounded range ──────────────────
-        # sqrt-compression: small arrows get boosted, large ones pulled down.
-        # Non-zero in-plane → mapped to [min_len, max_len] in data units.
-        # Near-zero in-plane (Vx-only) → drawn as scatter dots instead.
-        MIN_LEN = 0.025 * spatial_scale   # shortest visible arrow
-        MAX_LEN = 0.07  * spatial_scale   # longest arrow
-        has_inplane = in_plane_mag > 1e-9
+        # ── Physical velocity noise gate & linear proportional scaling ───────────
+        # In-plane Doppler noise floor is ~0.005 m/s (5 mm/s).
+        # Velocities below this gate are acoustic noise / negligible and rendered as dots.
+        NOISE_GATE_M_S = 0.005
+        has_inplane = in_plane_mag >= NOISE_GATE_M_S
 
-        t = np.where(has_inplane, np.sqrt(in_plane_mag / max_in_plane), 0.0)  # [0, 1], sqrt-compressed
-        target_len = np.where(has_inplane,
-                              MIN_LEN + t * (MAX_LEN - MIN_LEN),
-                              0.0)
-        sf = np.where(has_inplane, target_len / in_plane_mag, 0.0)
-        vy_plot = vy_arr * sf
-        vz_plot = vz_arr * sf
+        # Linear proportional scaling: vector length in data units (m) is strictly
+        # proportional to physical velocity, capped at 8% of the plot spatial dimension.
+        MAX_ARROW_LEN = 0.08 * spatial_scale
+        scale_len = (MAX_ARROW_LEN / max_in_plane) if max_in_plane > 1e-6 else 1.0
 
-        # ── Quiver: arrows with remapped lengths, coloured by total |V| ──────
+        vy_plot = np.where(has_inplane, vy_arr * scale_len, 0.0)
+        vz_plot = np.where(has_inplane, vz_arr * scale_len, 0.0)
+
+        # ── Quiver: arrows with proportional lengths, coloured by total |V| ───
         quiv = self.ax.quiver(
             x_arr, y_arr, vy_plot, vz_plot,
             color_values,
@@ -600,6 +573,32 @@ class CrossSectionViewTab(QWidget):
         for spine in self.ax.spines.values():
             spine.set_edgecolor(_FG)
         self.ax.grid(True, linestyle='--', alpha=0.25, linewidth=0.5, color=_FG)
+
+        # Reference quiver arrow for physical velocity scale
+        if max_in_plane >= 0.20:
+            ref_speed = 0.10
+        elif max_in_plane >= 0.08:
+            ref_speed = 0.05
+        elif max_in_plane >= 0.02:
+            ref_speed = 0.02
+        else:
+            ref_speed = max(round(max_in_plane, 3), 0.005)
+
+        ref_len = ref_speed * scale_len
+        try:
+            self.ax.quiverkey(
+                quiv,
+                X=0.88, Y=1.04,
+                U=ref_len,
+                label=f"{ref_speed * 100:.1f} cm/s ({ref_speed:.3f} m/s)",
+                labelpos='E',
+                coordinates='axes',
+                color=_FG,
+                labelcolor=_FG,
+                fontproperties={'weight': 'bold', 'size': 8.5},
+            )
+        except Exception as qk_err:
+            logger.debug(f"Could not render quiverkey: {qk_err}")
 
         # Colorbar
         if self.colorbar:
@@ -699,9 +698,9 @@ class CrossSectionViewTab(QWidget):
 
         if vx is not None:
             if vx > self.VX_SYMBOL_THRESHOLD:
-                direction = "↓ downstream (⊙)"
+                direction = "↓ downstream (⊗)"
             elif vx < -self.VX_SYMBOL_THRESHOLD:
-                direction = "↑ upstream (⊗)"
+                direction = "↑ upstream (⊙)"
             else:
                 direction = "≈ zero (•)"
             self.vx_label.setText(f"Vx: {vx:.4f} m/s\n{direction}")

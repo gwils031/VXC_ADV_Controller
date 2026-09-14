@@ -1,4 +1,4 @@
-﻿# VXC/ADV Controller
+# VXC/ADV Controller
 
 PyQt5 desktop application for controlling a Velmex VXC XY stage and automatically
 merging SonTek FlowTracker2 ADV exports with logged motor positions.
@@ -221,7 +221,7 @@ Controls the serial connection to the Velmex VXC.
 port: COM8          # Change to your actual COM port
 baudrate: 57600
 timeout: 2.0
-steps_per_foot: 46000
+steps_per_foot: 48000
 motion_timeout_sec: 60
 ```
 

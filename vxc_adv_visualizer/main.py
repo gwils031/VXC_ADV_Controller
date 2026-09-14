@@ -28,8 +28,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Application entry point."""
-    # Create config directory if needed
-    config_dir = "./config"
+    config_dir = str(Path(__file__).resolve().parent / "config")
     Path(config_dir).mkdir(parents=True, exist_ok=True)
     
     logger.info("Starting VXC/ADV Hardware Testing Application...")

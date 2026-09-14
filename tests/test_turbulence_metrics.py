@@ -217,6 +217,56 @@ class TestTurbulenceMetrics(unittest.TestCase):
             self.assertEqual(integrity.get("matched_samples_total"), 6)
             self.assertTrue(integrity.get("sample_accounting_match"))
 
+    def test_dwell_segment_despiking_removes_extreme_spike(self):
+        """A dwell segment of 20 samples with an extreme velocity spike should be despiked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            adv_path = root / "20260211-214219.csv"
+            vxc_path = root / "vxc.csv"
+
+            # Create 20 samples: 19 samples around 0.5 m/s, sample 10 has a 8.0 m/s spike
+            adv_lines = [
+                "UTC time,Corrected Velocity.X (m/s),Corrected Velocity.Y (m/s),Corrected Velocity.Z (m/s),"
+                "Temperature (°C),Raw Pressure (dbar),Voltage (V),Correlation Score.Beam1 (%),"
+                "Correlation Score.Beam2 (%),Correlation Score.Beam3 (%),SNR.Beam1 (dB),SNR.Beam2 (dB),SNR.Beam3 (dB)"
+            ]
+            vxc_lines = ["timestamp_utc,x_m,y_m,quality"]
+
+            for i in range(20):
+                t_str = f"2026-02-11 21:42:{i:02d}.000"
+                vx = 8.0 if i == 10 else (0.50 + 0.01 * (i % 3 - 1))
+                adv_lines.append(f"{t_str},{vx},0.10,0.02,20.0,9.0,12.0,85,85,85,25,25,25")
+                vxc_lines.append(f"{t_str},0.100,0.200,GOOD")
+
+            self._write_file(adv_path, "\n".join(adv_lines) + "\n")
+            self._write_file(vxc_path, "\n".join(vxc_lines) + "\n")
+
+            session_mgr = SessionManager(str(root / "Data_Output"))
+            session_mgr.start_session(SessionConfig(session_name="despike_dwell_test"))
+
+            worker = MergeWorkerThread(
+                adv_file=adv_path,
+                vxc_file=vxc_path,
+                output_dir=root / "Data_Output",
+                tolerance_sec=0.5,
+                session_manager=session_mgr,
+            )
+            worker.run()
+
+            avg_file = session_mgr.session_dir / "master_averaged.csv"
+            with open(avg_file, "r", encoding="utf-8", newline="") as f:
+                avg = list(csv.DictReader(f))[0]
+
+            # The 8.0 m/s spike was despiked; mean velocity should remain near 0.50 m/s, NOT corrupted to ~0.87 m/s
+            vx_mean = float(avg["Corrected Velocity.X (m/s)"])
+            self.assertAlmostEqual(vx_mean, 0.50, delta=0.03)
+
+            # TI_x should be small (< 0.1 m/s), not blown up to ~1.7 m/s by the spike
+            ti_x = float(avg["TI_x (m/s)"])
+            self.assertLess(ti_x, 0.10)
+
+            session_mgr.stop_session()
+
 
 if __name__ == "__main__":
     unittest.main()

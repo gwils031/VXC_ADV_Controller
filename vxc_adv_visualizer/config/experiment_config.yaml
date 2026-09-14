@@ -21,6 +21,19 @@ environment:
   # Sea level: ~10.1325 dbar
   atmospheric_pressure_dbar: 8.5
 
+# Probe mounting orientation angles (degrees)
+# Corrects for probe mounting pitch/roll/yaw misalignment relative to flume
+probe_orientation:
+  roll_deg: 0.0   # Rotation around X axis (streamwise)
+  pitch_deg: 0.0  # Rotation around Y axis (transverse)
+  yaw_deg: 0.0    # Rotation around Z axis (vertical)
+
+# Doppler noise floor correction (Voulgaris & Trowbridge 1998)
+doppler_noise:
+  enabled: true
+  min_samples: 32  # Minimum segment length required for spectral plateau estimation
+  high_freq_fraction: 0.25
+
 # Cross-section automation defaults
 automation:
   default_dwell_time_sec: 60.0

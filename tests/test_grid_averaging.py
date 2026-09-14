@@ -13,8 +13,8 @@ from vxc_adv_visualizer.data.adv_vxc_merger import ADVVXCMerger
 class TestGridAveraging(unittest.TestCase):
     """Test grid averaging functionality."""
 
-    def test_all_data_included_regardless_of_quality(self):
-        """Test that all ADV data contributes to averaging (no quality filtering)."""
+    def test_vxc_quality_filtering_in_grid_averaging(self):
+        """Test that non-GOOD VXC samples are excluded by default (filter_good_only=True)."""
         adv_csv = """UTC time,Local time,Sample ID,Corrected Velocity.X (m/s),Corrected Velocity.Y (m/s)
 2026-02-11 21:42:19.00,2026-02-11 16:42:19.00,1,0.1,0.2
 2026-02-11 21:42:20.00,2026-02-11 16:42:20.00,2,0.3,0.4
@@ -44,30 +44,36 @@ class TestGridAveraging(unittest.TestCase):
             merger.parse_vxc_csv(vxc_path)
             merger.merge()
             
-            # Write averaged output
+            # Default: filter_good_only=True -> only the GOOD sample is binned
             output_path, stats = merger.write_averaged_plane_csv(
                 avg_path,
-                grid_spacing_m=(0.001, 0.001)  # Small spacing to bin all at same point
+                grid_spacing_m=(0.001, 0.001),
+                filter_good_only=True
             )
             
-            # Read the averaged output
             import csv
             with open(output_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 rows = list(reader)
             
-            # Should have 1 bin with all 3 samples
-            self.assertEqual(len(rows), 1, "Should have 1 bin for all samples at same position")
-            
+            self.assertEqual(len(rows), 1, "Should have 1 bin")
             row = rows[0]
-            self.assertEqual(row['status'], 'OK', "Bin should be valid")
-            self.assertEqual(row['sample_count'], '3', "Should count ALL 3 samples regardless of VXC quality")
-            
-            # Verify averages: (0.1+0.3+0.5)/3 = 0.3, (0.2+0.4+0.6)/3 = 0.4
-            u_avg = float(row['Corrected Velocity.X (m/s)'])
-            v_avg = float(row['Corrected Velocity.Y (m/s)'])
-            self.assertAlmostEqual(u_avg, 0.3, places=5, msg="Should average all U values")
-            self.assertAlmostEqual(v_avg, 0.4, places=5, msg="Should average all V values")
+            self.assertEqual(row['status'], 'OK')
+            self.assertEqual(row['sample_count'], '1', "Should count only 1 sample with GOOD quality")
+            self.assertAlmostEqual(float(row['Corrected Velocity.X (m/s)']), 0.1, places=5)
+            self.assertAlmostEqual(float(row['Corrected Velocity.Y (m/s)']), 0.2, places=5)
+
+            # When filter_good_only=False -> all 3 samples are binned
+            output_path_all, stats_all = merger.write_averaged_plane_csv(
+                avg_path,
+                grid_spacing_m=(0.001, 0.001),
+                filter_good_only=False
+            )
+            with open(output_path_all, 'r', encoding='utf-8') as f:
+                rows_all = list(csv.DictReader(f))
+            self.assertEqual(rows_all[0]['sample_count'], '3', "Should count all 3 samples")
+            self.assertAlmostEqual(float(rows_all[0]['Corrected Velocity.X (m/s)']), 0.3, places=5)
+            self.assertAlmostEqual(float(rows_all[0]['Corrected Velocity.Y (m/s)']), 0.4, places=5)
             
         finally:
             Path(adv_path).unlink()

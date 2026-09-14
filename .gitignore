@@ -40,8 +40,8 @@ env/
 *.hdf5
 *.h5
 *.csv
-*.dat
-data/
+/data/
+!vxc_adv_visualizer/data/
 export/
 
 # Raw instrument data and processed output (local only)
