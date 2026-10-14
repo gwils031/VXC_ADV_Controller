@@ -126,7 +126,59 @@ Conversion of motor step counts to SI displacement in meters:
 $$x_{\text{m}} = \frac{x_{\text{steps}}}{48{,}000\text{ steps/ft}} \times 0.3048\text{ m/ft} = \frac{x_{\text{steps}}}{157{,}480.31496\text{ steps/m}}$$
 $$y_{\text{m}} = \frac{y_{\text{steps}}}{48{,}000\text{ steps/ft}} \times 0.3048\text{ m/ft} = \frac{y_{\text{steps}}}{157{,}480.31496\text{ steps/m}}$$
 
-### 3.3 Probe Coordinate Misalignment Transformation
+### 3.3 Workspace Boundaries & Physical Envelope
+
+The physical boundaries of the VXC traverse are parameterized in integer motor steps and converted to metric ranges:
+- **Default Transverse Limits (X-Axis, Motor 2):**
+  $$X_{\min} = 0\text{ steps} \quad (0.0000\text{ m})$$
+  $$X_{\max} = 165{,}654\text{ steps} \quad (1.0519\text{ m})$$
+- **Default Vertical Limits (Y-Axis, Motor 1):**
+  $$Y_{\min} = 0\text{ steps} \quad (0.0000\text{ m})$$
+  $$Y_{\max} = 57{,}651\text{ steps} \quad (0.3661\text{ m})$$
+
+For any commanded metric target $(x_{\text{m}}, y_{\text{m}})$, target motor steps are computed and clamped:
+$$x_{\text{steps}} = \text{clamp}\left(\text{round}\left(x_{\text{m}} \times \frac{48{,}000}{0.3048}\right), X_{\min}, X_{\max}\right)$$
+$$y_{\text{steps}} = \text{clamp}\left(\text{round}\left(y_{\text{m}} \times \frac{48{,}000}{0.3048}\right), Y_{\min}, Y_{\max}\right)$$
+
+### 3.4 Stepper Kinematics, Velocity Profile, & Transit Timing Formulation
+
+The Velmex VXC controller executes sequential axis motion using ASCII motion blocks (`A{motor}M{accel}, S{motor}M{speed}, I{motor}M{steps}, R`).
+- Default motion speed: $v_{\text{steps}} = 2{,}000\text{ steps/s}$ ($v \approx 0.0127\text{ m/s} = 1.27\text{ cm/s}$).
+- Acceleration code: $A = 2$ (parameter scale $0\text{--}127$).
+- Because the motion controller executes sequentially (moving transverse X first, then vertical Y):
+  $$T_x = \frac{|\Delta x_{\text{steps}}|}{v_{\text{steps}}}, \quad T_y = \frac{|\Delta y_{\text{steps}}|}{v_{\text{steps}}}$$
+  $$T_{\text{transit}} = 1.10 \times (T_x + T_y) + 0.50\text{ s}$$
+  *(where $1.10$ accounts for acceleration/deceleration trapezoidal ramping, and $0.50\text{ s}$ covers serial command transmission, controller parsing, and buffer clearing).*
+
+For an entire survey of $P$ points with dwell duration $T_{\text{dwell}}$ and settling duration $T_{\text{settling}}$, the remaining experiment time is predicted via:
+$$\text{ETA}(i) = \sum_{j=i}^{P} \left( T_{\text{transit}}(j-1 \to j) + T_{\text{settling}} + T_{\text{dwell}} \right)$$
+
+### 3.5 Automated Route Generation & Boustrophedon Scanning Geometry
+
+The automated path generator creates dense 1D lines or 2D grid routes across the cross-section:
+1. **Vertical Profile (1D line at fixed $x_{\text{fixed}}$):**
+   $$y_k = y_{\text{start}} + k \left(\frac{y_{\text{end}} - y_{\text{start}}}{N_y - 1}\right), \quad k = 0, 1, \dots, N_y - 1$$
+2. **Horizontal Profile (1D line at fixed $y_{\text{fixed}}$):**
+   $$x_k = x_{\text{start}} + k \left(\frac{x_{\text{end}} - x_{\text{start}}}{N_x - 1}\right), \quad k = 0, 1, \dots, N_x - 1$$
+3. **2D Boustrophedon (Snake) Grid ($N_x \times N_y$ stations):**
+   To minimize non-productive travel time between survey rows, transverse scan direction alternates on successive vertical elevation rows:
+   For vertical level $j = 0, 1, \dots, N_y - 1$ at elevation $y_j = y_{\text{start}} + j \Delta y$:
+   $$\mathbf{x}_{\text{scan}}(j) = \begin{cases}
+   \left[ x_{\text{start}} + k \Delta x \right]_{k=0}^{N_x - 1} & \text{if } j \text{ is even (left } \to \text{ right)} \\
+   \left[ x_{\text{end}} - k \Delta x \right]_{k=0}^{N_x - 1} & \text{if } j \text{ is odd (right } \to \text{ left)}
+   \end{cases}$$
+
+### 3.6 Closed-Loop Accuracy Verification & Recovery Dynamics
+
+Upon arrival at commanded station $(x_{\text{target}}, y_{\text{target}})$, actual motor positions are queried and evaluated against two-tier physical error tolerances:
+$$\epsilon_x = |x_{\text{actual}} - x_{\text{target}}|, \quad \epsilon_y = |y_{\text{actual}} - y_{\text{target}}|$$
+- **Tier 1 (Warning Threshold $\le 100\text{ steps} \approx 0.635\text{ mm}$):** Negligible backlash / microstep rounding. Logged as informational and scan proceeds.
+- **Tier 2 (Hard Limit $> 500\text{ steps} \approx 3.175\text{ mm}$):** Indicates mechanical slip, lead screw obstruction, or stall. Scan pauses, raising an alert.
+- **Exponential Backoff Re-attempt Loop:**
+  $$\Delta t_{\text{retry}}(k) = 2^{k-1}\text{ seconds} \quad (k \in \{1, 2, 3\} \implies 1\text{ s}, 2\text{ s}, 4\text{ s})$$
+  Status is re-verified (`verify_status()`) before each retry.
+
+### 3.7 Probe Coordinate Misalignment Transformation
 
 In shallow flumes or near boundary layers, researchers frequently pitch the probe head downward or roll the receiver mast to prevent boundary reflection or un-submergence of receiver arms. Any angular misalignment $(\phi, \theta, \psi)$ causes the dominant streamwise velocity to leak into the vertical and transverse components.
 
@@ -388,13 +440,41 @@ If $V_{\text{in-plane}} < 0.005\text{ m/s}$, the velocity is within the instrume
 
 #### B. Linear Proportional Vector Scaling
 Vector lengths scale linearly with velocity:
-$$L_{\text{arrow}} = \alpha \times V_{\text{in-plane}}$$
-An exact reference vector key (`ax.quiverkey`) is drawn in the lower margin displaying the physical standard (e.g. $0.05\text{ m/s} = 5.0\text{ cm/s}$).
+$$L_{\text{arrow}} = \text{scale\_len} \times V_{\text{in-plane}}$$
+
+Where the scaling factor is normalized to the physical domain size:
+$$S = \max(x_{\text{span}}, y_{\text{span}}, 0.10\text{ m})$$
+$$L_{\max} = 0.08 \times S$$
+$$\text{scale\_len} = \frac{L_{\max}}{\max(V_{\text{in-plane}})}$$
+$$v_{y,\text{plot}} = \begin{cases} V_y \times \text{scale\_len} & \text{if } V_{\text{in-plane}} \ge 0.005\text{ m/s} \\ 0 & \text{otherwise} \end{cases}$$
+$$v_{z,\text{plot}} = \begin{cases} V_z \times \text{scale\_len} & \text{if } V_{\text{in-plane}} \ge 0.005\text{ m/s} \\ 0 & \text{otherwise} \end{cases}$$
+
+An exact physical reference vector key (`ax.quiverkey`) is rendered in the margin with calibrated magnitude:
+$$V_{\text{ref}} = \begin{cases}
+0.10\text{ m/s (10.0 cm/s)} & \text{if } \max(V_{\text{in-plane}}) \ge 0.20\text{ m/s} \\
+0.05\text{ m/s (5.0 cm/s)} & \text{if } \max(V_{\text{in-plane}}) \ge 0.08\text{ m/s} \\
+0.02\text{ m/s (2.0 cm/s)} & \text{if } \max(V_{\text{in-plane}}) \ge 0.02\text{ m/s} \\
+\max(V_{\text{in-plane}}) & \text{otherwise}
+\end{cases}$$
+$$L_{\text{ref}} = V_{\text{ref}} \times \text{scale\_len}$$
 
 #### C. Out-of-Plane Flow Notation
 When looking downstream at the flume cross-section:
 - **$\otimes$ (Cross/Tail):** Streamwise velocity $V_x > +0.01\text{ m/s}$ (flowing into page, downstream).
 - **$\odot$ (Circle/Tip):** Streamwise velocity $V_x < -0.01\text{ m/s}$ (flowing out of page, upstream).
+- **$\bullet$ (Solid Dot):** Streamwise velocity $|V_x| \le 0.01\text{ m/s}$ (negligible out-of-plane transit).
+
+#### D. Scientific Colormap Normalizations
+To ensure high contrast on the `#111827` (dark navy) figure background:
+1. **Total Speed $|V|$ & TKE Modes:**
+   The standard Google `turbo` colormap is clipped to $[0.30, 0.92]$ (light cyan $\to$ green $\to$ yellow $\to$ red), stripping dark purple/navy hues that would camouflage against the dark canvas:
+   $$\text{cmap} = \text{turbo}(s), \quad s \in [0.30, 0.92]$$
+   $$\text{Norm}(x) = \frac{x - \min(x)}{\max(x) - \min(x)}$$
+2. **Reynolds Shear Stress ($\tau_{xz}$) Mode:**
+   Uses a symmetric two-slope normalizer centered at zero with the diverging `RdBu_r` colormap:
+   $$\tau_{\max} = \max(|\min(\tau_{xz})|, |\max(\tau_{xz})|)$$
+   $$\text{TwoSlopeNorm}\left(v_{\min} = -\tau_{\max}, v_{\text{center}} = 0.0, v_{\max} = +\tau_{\max}\right)$$
+   This guarantees that zero turbulent momentum exchange renders as neutral pure white, negative shear stress as blue, and positive shear stress as red.
 
 ---
 
